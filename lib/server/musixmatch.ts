@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { TrackingLinks, TrackSummary } from "@/lib/types";
+import type { RichsyncLine, RichsyncPreview, RichsyncToken, TrackingLinks, TrackSummary } from "@/lib/types";
 
 const BASE = "https://api.musixmatch.com/ws/1.1";
 
@@ -36,6 +36,17 @@ interface RawLyrics {
 
 interface LyricsBody {
   lyrics?: RawLyrics;
+}
+
+interface RawRichsync {
+  richsync_body?: string;
+  lyrics_copyright?: string;
+  pixel_tracking_url?: string;
+  script_tracking_url?: string;
+}
+
+interface RichsyncBody {
+  richsync?: RawRichsync;
 }
 
 export interface LyricsPayload {
@@ -107,6 +118,40 @@ function toTrackSummary(rawTrack: RawTrack | undefined): TrackSummary | null {
   };
 }
 
+function toTracking(source: RawLyrics | RawRichsync): TrackingLinks {
+  return {
+    pixel: source.pixel_tracking_url ?? null,
+    script: source.script_tracking_url ?? null,
+  };
+}
+
+function tokenFrom(rawToken: unknown): RichsyncToken | null {
+  if (!rawToken || typeof rawToken !== "object") return null;
+  const token = rawToken as { c?: unknown; o?: unknown };
+  const text = typeof token.c === "string" ? token.c : "";
+  const offset = Number(token.o);
+  if (!text.trim() || !Number.isFinite(offset)) return null;
+  return { text, offset };
+}
+
+function lineFrom(rawLine: unknown): RichsyncLine | null {
+  if (!rawLine || typeof rawLine !== "object") return null;
+  const line = rawLine as { ts?: unknown; te?: unknown; x?: unknown; l?: unknown };
+  const start = Number(line.ts);
+  const end = Number(line.te);
+  const text = typeof line.x === "string" ? line.x.trim() : "";
+  const tokens = Array.isArray(line.l) ? line.l.map(tokenFrom).filter(Boolean) : [];
+
+  if (!text || !Number.isFinite(start) || !Number.isFinite(end) || tokens.length < 3) return null;
+  return { start, end, text, tokens: tokens as RichsyncToken[] };
+}
+
+function parseRichsyncLines(body: string): RichsyncLine[] {
+  const parsed = JSON.parse(body) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(lineFrom).filter((line): line is RichsyncLine => line !== null);
+}
+
 export async function searchTracks(query: string, limit = 8): Promise<TrackSummary[]> {
   // q_track_artist matches title+artist (not lyrics) and rating sort surfaces the
   // well-known version first — far better relevance for a song picker than a bare `q`.
@@ -134,9 +179,27 @@ export async function getTrackLyrics(trackId: number): Promise<LyricsPayload> {
   return {
     body: lyricsBody,
     copyright: lyrics.lyrics_copyright?.trim() ?? "Lyrics provided by Musixmatch",
-    tracking: {
-      pixel: lyrics.pixel_tracking_url ?? null,
-      script: lyrics.script_tracking_url ?? null,
-    },
+    tracking: toTracking(lyrics),
+  };
+}
+
+export async function getRichsyncPreview(trackId: number): Promise<RichsyncPreview> {
+  const body = await callMusixmatch<RichsyncBody>("track.richsync.get", { track_id: trackId });
+  const richsync = body.richsync;
+  const richsyncBody = richsync?.richsync_body?.trim();
+
+  if (!richsync || !richsyncBody) {
+    throw new MusixmatchProviderError(`No richsync body for track ${trackId}`);
+  }
+
+  const lines = parseRichsyncLines(richsyncBody);
+  const line = lines.find((item) => item.text.length >= 18) ?? lines[0];
+  if (!line) throw new MusixmatchProviderError(`No playable richsync line for track ${trackId}`);
+
+  return {
+    trackId,
+    line,
+    copyright: richsync.lyrics_copyright?.trim() ?? "Lyrics provided by Musixmatch",
+    tracking: toTracking(richsync),
   };
 }

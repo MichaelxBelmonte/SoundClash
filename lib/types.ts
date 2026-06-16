@@ -24,6 +24,25 @@ export interface FinishLineRound {
   tracking: TrackingLinks;
 }
 
+export interface RichsyncToken {
+  text: string;
+  offset: number;
+}
+
+export interface RichsyncLine {
+  start: number;
+  end: number;
+  text: string;
+  tokens: RichsyncToken[];
+}
+
+export interface RichsyncPreview {
+  trackId: number;
+  line: RichsyncLine;
+  copyright: string;
+  tracking: TrackingLinks;
+}
+
 export interface SearchResponse {
   query: string;
   results: TrackSummary[];
@@ -31,6 +50,10 @@ export interface SearchResponse {
 
 export interface FinishLineResponse {
   round: FinishLineRound;
+}
+
+export interface RichsyncResponse {
+  preview: RichsyncPreview;
 }
 
 export interface ErrorResponse {
