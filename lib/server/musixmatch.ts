@@ -28,8 +28,10 @@ async function call(method: string, params: Record<string, string | number>): Pr
 
 /** Search tracks by free-text query. Returns only songs that have lyrics. */
 export async function searchTracks(query: string, limit = 8): Promise<TrackSummary[]> {
+  // q_track_artist matches title+artist (not lyrics) and rating sort surfaces the
+  // well-known version first — far better relevance for a song picker than a bare `q`.
   const body = await call("track.search", {
-    q: query,
+    q_track_artist: query,
     page_size: limit,
     s_track_rating: "desc",
     f_has_lyrics: 1,
