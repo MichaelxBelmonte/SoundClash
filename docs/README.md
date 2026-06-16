@@ -10,6 +10,7 @@ This README is the front door. Each sibling doc below owns one slice of the proj
 
 | Doc | What it covers |
 |---|---|
+| [`CONTEST_RULES.md`](./CONTEST_RULES.md) | The official Musicathon 2026 rules (eligibility, requirements, judging, prizes, content-usage restrictions) — the source of every project constraint. |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | System design: Next.js server-only provider proxy, route handlers, data flow, deployment on Replit. |
 | [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md) | Game modes (MVP + stretch karaoke), the AI host personas, social loop, scoring, and the feature → judging-criteria map. |
 | [`DATA_MODEL.md`](./DATA_MODEL.md) | Supabase/Postgres tables, RLS, the `leaderboard_global` view, and the runtime `Round` shape — all references-only (no lyric text). |
