@@ -18,6 +18,7 @@ export interface TrackingLinks {
 
 export interface FinishLineRound {
   trackId: number;
+  seed: number;
   prompt: string;
   answer: string;
   copyright: string;

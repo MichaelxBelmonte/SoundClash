@@ -26,6 +26,8 @@ export default function SearchExperience() {
   const [selectedTrack, setSelectedTrack] = useState<TrackSummary | null>(null);
   const [round, setRound] = useState<FinishLineRound | null>(null);
   const [loadingTrackId, setLoadingTrackId] = useState<number | null>(null);
+  const [roundNumber, setRoundNumber] = useState(1);
+  const [totalScore, setTotalScore] = useState(0);
 
   const text = copy[locale];
   const languageLabels = useMemo(
@@ -59,6 +61,8 @@ export default function SearchExperience() {
       setRound(null);
       setSelectedTrack(null);
       setRoundError(null);
+      setRoundNumber(1);
+      setTotalScore(0);
     } catch (err) {
       setResults([]);
       setSearched(true);
@@ -68,7 +72,7 @@ export default function SearchExperience() {
     }
   }
 
-  async function startRound(track: TrackSummary) {
+  async function loadRound(track: TrackSummary, seed: number) {
     setSelectedTrack(track);
     setRound(null);
     setRoundError(null);
@@ -78,7 +82,7 @@ export default function SearchExperience() {
       const response = await fetch("/api/rounds/finish-line", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trackId: track.trackId }),
+        body: JSON.stringify({ trackId: track.trackId, seed }),
       });
       const payload = (await response.json()) as Partial<FinishLineResponse & ErrorResponse>;
 
@@ -92,6 +96,19 @@ export default function SearchExperience() {
     } finally {
       setLoadingTrackId(null);
     }
+  }
+
+  function startRound(track: TrackSummary) {
+    setRoundNumber(1);
+    setTotalScore(0);
+    void loadRound(track, 0);
+  }
+
+  function nextRound() {
+    if (!selectedTrack) return;
+    const nextRoundNumber = roundNumber + 1;
+    setRoundNumber(nextRoundNumber);
+    void loadRound(selectedTrack, nextRoundNumber - 1);
   }
 
   return (
@@ -136,11 +153,17 @@ export default function SearchExperience() {
               round={round}
               track={selectedTrack}
               labels={text}
+              roundNumber={roundNumber}
+              totalScore={totalScore}
               onReset={() => {
                 setRound(null);
                 setSelectedTrack(null);
                 setRoundError(null);
+                setRoundNumber(1);
+                setTotalScore(0);
               }}
+              onNextRound={nextRound}
+              onScored={(points) => setTotalScore((current) => current + points)}
             />
           ) : null}
 

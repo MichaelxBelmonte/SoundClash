@@ -21,28 +21,43 @@ export function normalizeAnswer(value: string): string {
 
 export function buildFinishLineRound(input: {
   trackId: number;
+  seed?: number;
   lyrics: string;
   copyright: string;
   tracking: TrackingLinks;
 }): FinishLineRound {
-  const lines = lyricLines(input.lyrics);
-  if (lines.length === 0) throw new Error("No playable lyric lines found");
+  // Build the pool of lines that yield a valid (>=3 char) last-word answer, so the
+  // seed indexes directly into distinct playable rounds (consecutive seeds never collide
+  // until the pool is exhausted) instead of seeding a forward-search that funnels onto
+  // the same lines.
+  const seen = new Set<string>();
+  const playable = lyricLines(input.lyrics)
+    .map((line) => {
+      const answer = line.match(LAST_WORD)?.[1];
+      if (!answer || normalizeAnswer(answer).length < 3) return null;
+      return { line, answer };
+    })
+    .filter((entry): entry is { line: string; answer: string } => entry !== null)
+    // Drop repeated lines (choruses) so a multi-round game never replays the same line.
+    .filter((entry) => {
+      const key = normalizeAnswer(entry.line);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
-  const start = input.trackId % lines.length;
-  for (let offset = 0; offset < lines.length; offset += 1) {
-    const line = lines[(start + offset) % lines.length];
-    const match = line.match(LAST_WORD);
-    const answer = match?.[1];
-    if (!answer || normalizeAnswer(answer).length < 3) continue;
+  if (playable.length === 0) throw new Error("No playable lyric lines found");
 
-    return {
-      trackId: input.trackId,
-      prompt: line.replace(LAST_WORD, `_____$2`),
-      answer,
-      copyright: input.copyright,
-      tracking: input.tracking,
-    };
-  }
+  const seed = Math.max(0, input.seed ?? 0);
+  const index = (input.trackId + seed) % playable.length;
+  const { line, answer } = playable[index];
 
-  throw new Error("No playable answer found");
+  return {
+    trackId: input.trackId,
+    seed,
+    prompt: line.replace(LAST_WORD, `_____$2`),
+    answer,
+    copyright: input.copyright,
+    tracking: input.tracking,
+  };
 }

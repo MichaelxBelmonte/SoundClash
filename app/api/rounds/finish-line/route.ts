@@ -7,10 +7,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { trackId?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as
+    | { trackId?: unknown; seed?: unknown }
+    | null;
   const trackId = Number(body?.trackId);
+  const seed = Math.max(0, Number(body?.seed ?? 0));
 
-  if (!Number.isInteger(trackId) || trackId <= 0) {
+  if (!Number.isInteger(trackId) || trackId <= 0 || !Number.isFinite(seed)) {
     return NextResponse.json<ErrorResponse>(
       { error: "Invalid trackId.", code: "invalid_track_id" },
       { status: 400 },
@@ -21,6 +24,7 @@ export async function POST(req: NextRequest) {
     const lyrics = await getTrackLyrics(trackId);
     const round = buildFinishLineRound({
       trackId,
+      seed,
       lyrics: lyrics.body,
       copyright: lyrics.copyright,
       tracking: lyrics.tracking,

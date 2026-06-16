@@ -18,16 +18,32 @@ interface FinishLineGameProps {
     wrongAnswer: string;
     answerWas: string;
     scoreLabel: string;
+    totalScoreLabel: string;
+    roundLabel: string;
     timeLabel: string;
     pointsLabel: string;
+    nextRound: string;
     richsyncTitle: string;
     richsyncLoading: string;
     richsyncUnavailable: string;
   };
+  roundNumber: number;
+  totalScore: number;
   onReset: () => void;
+  onNextRound: () => void;
+  onScored: (points: number) => void;
 }
 
-export default function FinishLineGame({ round, track, labels, onReset }: FinishLineGameProps) {
+export default function FinishLineGame({
+  round,
+  track,
+  labels,
+  roundNumber,
+  totalScore,
+  onReset,
+  onNextRound,
+  onScored,
+}: FinishLineGameProps) {
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<{ correct: boolean; elapsedMs: number; points: number } | null>(null);
   const startedAt = useRef(Date.now());
@@ -43,7 +59,9 @@ export default function FinishLineGame({ round, track, labels, onReset }: Finish
     event.preventDefault();
     if (!answer.trim() || result) return;
     const elapsedMs = Math.min(Date.now() - startedAt.current, ROUND_TIME_LIMIT_MS);
-    setResult({ correct: isCorrect, elapsedMs, points: scoreFinishLine(isCorrect, elapsedMs) });
+    const points = scoreFinishLine(isCorrect, elapsedMs);
+    setResult({ correct: isCorrect, elapsedMs, points });
+    onScored(points);
   }
 
   return (
@@ -52,11 +70,19 @@ export default function FinishLineGame({ round, track, labels, onReset }: Finish
         <img alt="" className="hidden" referrerPolicy="no-referrer" src={round.tracking.pixel} />
       ) : null}
 
-      <p className="text-xs font-semibold uppercase tracking-wider text-red-300">
-        {labels.roundTitle}
-      </p>
-      <h2 className="mt-2 text-xl font-semibold text-white">{track.trackName}</h2>
-      <p className="text-sm text-neutral-400">{track.artistName}</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-red-300">
+            {labels.roundTitle}
+          </p>
+          <h2 className="mt-2 text-xl font-semibold text-white">{track.trackName}</h2>
+          <p className="text-sm text-neutral-400">{track.artistName}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-right">
+          <Stat label={labels.roundLabel} value={roundNumber} />
+          <Stat label={labels.totalScoreLabel} value={`${totalScore} ${labels.pointsLabel}`} />
+        </div>
+      </div>
 
       <p className="mt-6 rounded-md bg-neutral-950 p-4 text-lg leading-8 text-white">
         {round.prompt}
@@ -90,13 +116,24 @@ export default function FinishLineGame({ round, track, labels, onReset }: Finish
 
       <div className="mt-5 flex items-end justify-between gap-4 border-t border-neutral-850 pt-4">
         <p className="text-xs leading-5 text-neutral-500">{round.copyright}</p>
-        <button
-          type="button"
-          onClick={onReset}
-          className="shrink-0 text-sm font-medium text-neutral-300 hover:text-white"
-        >
-          {labels.resetRound}
-        </button>
+        <div className="flex shrink-0 gap-3">
+          {result ? (
+            <button
+              type="button"
+              onClick={onNextRound}
+              className="text-sm font-semibold text-red-200 hover:text-white"
+            >
+              {labels.nextRound}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onReset}
+            className="text-sm font-medium text-neutral-300 hover:text-white"
+          >
+            {labels.resetRound}
+          </button>
+        </div>
       </div>
 
       <div className="mt-5">
