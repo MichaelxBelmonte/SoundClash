@@ -1,5 +1,7 @@
 # Compliance & Security
 
+> **Status:** This document describes the **target architecture**, not the current build. The in-memory lyric-handling posture (references only, no lyric-text persistence, server-side keys) is **live today**. Supabase Postgres/RLS, Anthropic Claude for round/decoy/mood generation, and the async-challenge routes below are **PLANNED, not yet built** — there is no `@supabase` or `@anthropic-ai` dependency, and routes such as `/api/round/generate`, `/api/host/banter`, `/api/mood`, and `/api/challenge` do not exist. Host banter is currently localized string templates, not an LLM. For exactly what is live today, see [`../README.md`](../README.md) → "Status & known limitations".
+
 This document is the single source of truth for how **Soundclash** handles licensed lyric content, provider secrets, and contest content-usage rules. It is written to be **judge-verifiable**: every claim below can be checked against the public repo, the running demo, or a network trace.
 
 > Scope: Musixmatch Musicathon 2026 — non-commercial demo. Solo developer, deadline 21 June 2026.
@@ -16,17 +18,17 @@ A judge can verify each item independently. Verification hints are in the right 
 |---|------|--------|---------------|
 | 1 | **No lyric text is ever persisted.** Rounds store only references (`track_id`, `line_index`, `seed`). | ✅ | Inspect `rounds` table — see [`DATA_MODEL.md`](./DATA_MODEL.md); there are no lyric-text columns. |
 | 2 | **Prompt/options/answer text is regenerated live** at play time and shown transiently. | ✅ | Replay a challenge link; lyric text appears in the response payload, not in any stored row. |
-| 3 | **No redistribution of lyric excerpts** in shared challenge links. | ✅ | A shared slug carries `share_slug` + references only; the recipient re-fetches lyrics live. |
+| 3 | **No redistribution of lyric excerpts** in shared challenge links. | ⏳ Planned | Async share-slug challenges are not built yet. By design a shared slug will carry `share_slug` + references only; the recipient re-fetches lyrics live. |
 | 4 | **`lyrics_copyright` is displayed on every lyric render.** | ✅ | Any round screen shows the Musixmatch copyright string under the lyric. |
 | 5 | **Musixmatch tracking pixel/script fires on every lyric render.** | ✅ | Network tab shows the tracking call each time a lyric is shown. |
 | 6 | **Real-time display only** — lyrics are not cached to disk or DB. | ✅ | No lyric cache table; server proxy fetches per request. |
 | 7 | **All provider keys are server-side**; the browser never sees a secret key. | ✅ | View page source / network — only `NEXT_PUBLIC_*` values reach the client. |
 | 8 | **`.env.local` is gitignored and absent from the public repo** (and its full history). | ✅ | `git -C . log --all --name-only \| grep .env.local` returns nothing; only `.env.example` is tracked. |
-| 9 | **Supabase RLS enabled on every table.** | ✅ | See policies in [`DATA_MODEL.md`](./DATA_MODEL.md). |
+| 9 | **Supabase RLS enabled on every table.** | ⏳ Planned | No Supabase tables exist yet (sessions are in-memory). See target policies in [`DATA_MODEL.md`](./DATA_MODEL.md). |
 | 10 | **Non-commercial demo use only.** | ✅ | Stated in [`README.md`](../README.md) and below. |
 | 11 | **Keys pasted in chat are flagged for rotation** (ElevenLabs key, Supabase DB password). | ⚠️ Action required | See [§6 Key Rotation](#6-key-rotation-required). |
 
-Legend: ✅ implemented/verified · ⚠️ action required before/at submission.
+Legend: ✅ implemented/verified · ⏳ Planned (target architecture, not yet built) · ⚠️ action required before/at submission.
 
 Current room implementation uses an in-memory server store for transient sessions.
 That is acceptable for the hackathon skeleton because it still stores only active
@@ -62,9 +64,10 @@ This is the core of our compliance posture: **we store what to regenerate, not t
                                                  │  at play time
                                                  ▼
    LIVE (transient)      ┌─────────────────────────────────────────────┐
-   regenerated, never    │  Musixmatch fetch (lyrics/subtitle/richsync)  │
+   regenerated, never    │  Musixmatch fetch (search/track/richsync)     │
    stored                │            +                                  │
-                         │  Claude (prompt/options/answer + mood)        │
+                         │  server-side regeneration (answer/decoys)     │
+                         │  Claude (prompt/options/mood) — ⏳ PLANNED     │
                          └───────────────────────┬─────────────────────┘
                                                  │  shown transiently
                                                  ▼
@@ -81,9 +84,9 @@ This is the core of our compliance posture: **we store what to regenerate, not t
 | `track_id` | ✅ reference | Musixmatch `track.search` / `matcher.track.get` |
 | `line_index` | ✅ reference | index into the live-fetched lyric body |
 | `round_type` / `seed` | ✅ reference | seed makes regeneration deterministic |
-| `prompt` (e.g. line with blanked word) | ❌ never | regenerated live from Musixmatch + Claude |
-| `options[]` (decoys) | ❌ never | regenerated live (Claude prompts P2/P3) |
-| `answer` (correct word/line/song) | ❌ never | regenerated live from the lyric body |
+| `prompt` (e.g. line with blanked word) | ❌ never | regenerated live from the Musixmatch lyric body (Claude prompt P1 ⏳ planned) |
+| `options[]` (decoys) | ❌ never | regenerated live server-side (Claude prompts P2/P3 ⏳ planned) |
+| `answer` (correct word/line/song) | ❌ never | regenerated live from the lyric body (`/api/rounds/check`, `/api/rounds/finish-line`) |
 | `copyright` string | ❌ never | comes back live from Musixmatch on each fetch |
 
 The persisted `rounds` table has **no lyric-text columns** by design:
@@ -129,11 +132,11 @@ interface Round {
 
 ### 2.3 Why regeneration is deterministic (and safe)
 
-A persisted round = `track_id + line_index + round_type + seed`. At play time we re-fetch the lyric body live and pass `seed` to Claude, so:
+A persisted round = `track_id + line_index + round_type + seed`. At play time we re-fetch the lyric body live and regenerate from `seed`, so:
 
 - A challenge replays the **same rounds** for every friend (same blanks, same decoy ordering) without storing any lyric text.
-- Two players hitting the same `share_slug` get identical prompts because the seed drives decoy selection and word-blanking deterministically.
-- Decoys (misheard / name-that-song / next-line distractors) are generated by Claude (prompts **P2/P3** in [`PROMPTS.md`](./PROMPTS.md)) and held in memory only for the round's lifetime.
+- Two players hitting the same `share_slug` get identical prompts because the seed drives decoy selection and word-blanking deterministically. _(Persisted rounds + share-slug replay are ⏳ planned; today rounds live in the in-memory session store.)_
+- Decoys (misheard / name-that-song / next-line distractors) are regenerated live and held in memory only for the round's lifetime. _Claude-generated decoys (prompts **P2/P3** in [`PROMPTS.md`](./PROMPTS.md)) are ⏳ planned._
 
 ### 2.4 Mandatory attribution + tracking on every render
 
@@ -152,7 +155,7 @@ function onLyricRender(round: Round) {
 
 ### 2.5 Musixmatch API surface used (tested status)
 
-We only use endpoints verified live on the project key. **`track.lyrics.mood.get` is forbidden on our key (403)** — we do **not** call it; mood/theme is derived with Claude (prompt **P4**) from the full lyrics.
+We only use endpoints verified live on the project key. **`track.lyrics.mood.get` is forbidden on our key (403)** — we do **not** call it; mood/theme is planned to be derived with Claude (prompt **P4** ⏳ planned) from the full lyrics.
 
 | Endpoint | Status | Use |
 |----------|--------|-----|
@@ -182,7 +185,7 @@ This richsync body is fetched live, used for the karaoke stretch mode, and never
 
 ### 3.1 Server-side proxy — the browser never sees a secret
 
-All provider calls (Musixmatch, ElevenLabs, Anthropic, Supabase service operations) happen **only** inside Next.js server route handlers / server actions acting as a proxy. The browser talks to our own API routes; our server talks to the providers with secret keys.
+All provider calls happen **only** inside Next.js server route handlers / server actions acting as a proxy. The browser talks to our own API routes; our server talks to the providers with secret keys. Live today: Musixmatch (`lib/server/musixmatch.ts`), ElevenLabs TTS (`lib/server/elevenlabs.ts`), and LALAL.AI stems (`lib/server/lalal.ts`). Planned: Anthropic Claude and Supabase service operations (neither dependency is installed yet).
 
 ```
 Browser ──> /api/* (Next.js server route / action) ──> Musixmatch / ElevenLabs / Anthropic
@@ -227,9 +230,11 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... # public (client-safe)
 
 The publishable key is intentionally public because **Row-Level Security is the actual authorization boundary** — not key secrecy. Without an RLS policy granting access, the publishable key can read/write nothing.
 
-### 3.4 Supabase RLS
+### 3.4 Supabase RLS (⏳ Planned)
 
-RLS is **enabled on every table** (`profiles`, `games`, `rounds`, `challenges`, `scores`) and on the `leaderboard_global` view's underlying access. Policy details live in [`DATA_MODEL.md`](./DATA_MODEL.md). Key points:
+> **Planned, not built.** There is no Supabase project, no tables, and no `@supabase` dependency yet; sessions live in an in-memory server store. The design below is the target once persistence lands.
+
+In the target design, RLS is **enabled on every table** (`profiles`, `games`, `rounds`, `challenges`, `scores`) and on the `leaderboard_global` view's underlying access. Policy details live in [`DATA_MODEL.md`](./DATA_MODEL.md). Key points:
 
 - Authenticated users act through `profiles` (`id` references `auth.users`).
 - Anonymous casual play is allowed via `anon_name` (challenge guests, no auth) — but only through policies that scope what a guest may read/write.
@@ -245,7 +250,7 @@ alter table scores     enable row level security;
 
 ### 3.5 Secret hygiene — repo state (verified)
 
-The repo is **public** at `github.com/MichaelxBelmonte/LyricRoyale`. Secrets must therefore never enter git.
+The repo is **public** at `github.com/MichaelxBelmonte/SoundClash`. Secrets must therefore never enter git.
 
 - `.env*` is gitignored, with an explicit allowlist exception for the template:
 
@@ -266,7 +271,9 @@ The repo is **public** at `github.com/MichaelxBelmonte/LyricRoyale`. Secrets mus
 
 ## 4. Data We Store (and What We Deliberately Don't)
 
-| Table | Stores | Lyric text? |
+> **Note:** The Supabase tables below are the ⏳ **planned** persistence layer; none exist yet. Today the only store is the in-memory session store (`lib/server/session-store.ts`) holding transient active-round state. The "no lyric text" guarantee holds in both: it is true today (in memory) and is the contract for the planned tables.
+
+| Table (⏳ planned) | Stores | Lyric text? |
 |-------|--------|-------------|
 | `profiles` | `display_name`, `host_persona` | ❌ |
 | `games` | `mode`, `created_by`, `config` (jsonb) | ❌ |
@@ -279,9 +286,11 @@ Lyric prompts, options, answers, and `lyrics_copyright` strings exist **only in 
 
 ---
 
-## 5. Claude / LLM Lyric Handling
+## 5. Claude / LLM Lyric Handling (⏳ Planned)
 
-Lyric usage inside LLM calls is **transient**:
+> **Planned, not built.** There is no `@anthropic-ai/sdk` dependency and no LLM is called today; host banter is currently localized string templates in `lib/game/host-banter.ts`. The policy below applies once Claude is wired in.
+
+In the target design, lyric usage inside LLM calls is **transient**:
 
 - Prompts that include lyric text (P1 round generator, P2 misheard decoys, P3 name-that-song decoys, P4 mood/theme) are sent live and **never logged or stored**.
 - All prompts return **strict JSON** so output can be parsed and shown without persisting raw lyric strings.

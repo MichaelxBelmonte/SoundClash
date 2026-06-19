@@ -1,0 +1,17 @@
+Soundclash — third-party content notice
+========================================
+
+The MIT license in LICENSE covers ONLY the source code in this repository.
+
+Lyric text, richsync timing, and track metadata are provided at runtime by the
+Musixmatch API and remain the property of their respective rights holders. They
+are licensed, not owned, by this project and are NOT redistributed in this repo:
+the app persists references only (track ids) and shows lyric content transiently,
+with the required Musixmatch copyright line and tracking pixel rendered wherever
+lyrics appear. See docs/COMPLIANCE.md.
+
+This project is a non-commercial demo built for the Musixmatch Musicathon 2026.
+Use of the Musixmatch API is subject to Musixmatch's own terms of service.
+
+Generated audio assets under public/audio/ were produced with ElevenLabs and are
+included for demo playback only.

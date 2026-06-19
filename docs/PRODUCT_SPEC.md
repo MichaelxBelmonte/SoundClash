@@ -1,5 +1,7 @@
 # Soundclash — Product Specification
 
+> **Status:** This spec describes the **target architecture**, not the current build. Several capabilities below are **PLANNED, not yet built** — notably Supabase/Postgres + Row Level Security and any DB-backed scores/challenges/leaderboards, Claude/Anthropic round generation and host banter (host banter today is localized string templates, not an LLM), async share-slug challenges, and the routes `/api/round/generate`, `/api/host/banter`, `/api/mood`, `/api/challenge`, `/api/stems`, `/api/mxm/lyrics`, `/api/mxm/subtitle`, `/api/mxm/match`. What is **live today** is an in-memory session store with ~1s HTTP polling (no DB), real Musixmatch/ElevenLabs/LALAL.AI proxy routes, and server-side answer regeneration. For exactly what ships today, see the **"Status & known limitations"** section of [`README.md`](../README.md).
+
 > A zero-install **music party game** built on real Musixmatch lyrics, phone controllers, a shared host screen, and an AI showrunner voice. Built for the Musixmatch Musicathon 2026.
 
 Positioning: *"Press play. Pick a fight."*
@@ -182,8 +184,9 @@ async function buildRound(ref: { trackId: string; lineIndex: number; type: Round
   // 1. Fetch lyrics LIVE from Musixmatch (full lyrics, line-level, or word-level synced)
   const lyrics = await mxm.lyricsGet(ref.trackId);        // track.lyrics.get → 200, FULL lyrics
 
-  // 2. Generate prompt/options/answer LIVE with Claude (strict JSON; lyric usage transient)
-  const generated = await claude.generateRound(ref, lyrics); // P1 / P2 / P3 per round_type
+  // 2. Build prompt/options/answer LIVE. Today this is server-side round logic;
+  //    the Claude path below (strict JSON; lyric usage transient) is ⏳ PLANNED.
+  const generated = await claude.generateRound(ref, lyrics); // P1 / P2 / P3 per round_type (planned)
 
   // 3. Return transient Round to the client; persist ONLY the reference + score later
   return { ...generated, copyright: lyrics.lyrics_copyright };
@@ -277,9 +280,11 @@ interface Round {
 }
 ```
 
-### Supabase / Postgres schema (references only)
+### Supabase / Postgres schema (references only) — ⏳ Planned
 
-RLS is enabled on every table. Anonymous casual play is allowed via `anon_name` (challenge guests, no auth); authed users go through `profiles`. The Supabase project ref stays in `.env.local` / deployment secrets, not in the public repo.
+> ⏳ **Planned, not built.** There is no Supabase project, no `@supabase` dependency, and no `supabase/` directory in the repo today. Live sessions use an in-memory store (`lib/server/session-store.ts`, a per-instance module-global Map) synced via ~1s HTTP polling — no database, no RLS, no leaderboards yet. The schema below is the target.
+
+When built, RLS will be enabled on every table. Anonymous casual play is allowed via `anon_name` (challenge guests, no auth); authed users go through `profiles`. The Supabase project ref stays in `.env.local` / deployment secrets, not in the public repo.
 
 ```sql
 create table profiles (
@@ -339,11 +344,13 @@ create view leaderboard_global as ( /* top scores joined to profiles.display_nam
 Server-side secrets (no `NEXT_PUBLIC` prefix): `MXM_KEY`, `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_REF`.
 Public (browser, protected by RLS): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 
-Secrets live only in `.env.local` (gitignored). The repo is public at github.com/MichaelxBelmonte/LyricRoyale. See [`README.md`](../README.md) for the local-setup steps.
+Secrets live only in `.env.local` (gitignored). The repo is public at github.com/MichaelxBelmonte/SoundClash. See [`README.md`](../README.md) for the local-setup steps.
 
 ---
 
 ## 9. Social Loop
+
+> ⏳ **Mostly planned.** Room-code / zero-install shared-room play is live today (in-memory sessions + polling). The **async challenge slug** (`app/c/[slug]`, `app/play/[gameId]`, `/api/challenge`) and **leaderboards** (`app/leaderboard`, the `scores` table + `leaderboard_global` view) are PLANNED and depend on the Supabase work in [§8](#8-compliance--data-model).
 
 Web-based, Jackbox/Kahoot-style: zero install, room-code or shareable link.
 
@@ -369,7 +376,7 @@ Musixmatch key verified **live**:
 
 **ElevenLabs** verified: tier creator, ~131k credits. `POST /v1/text-to-speech/{voice_id}` returns 200 `audio/mpeg`; auth via the `xi-api-key` header.
 
-**Anthropic (Claude):** model `claude-opus-4-8` (current, verified). All host/round generation runs server-side; the browser never sees the key.
+**Anthropic (Claude):** ⏳ **Planned, not built.** There is no `@anthropic-ai/sdk` dependency and no Claude calls wired in today; round prompts/options/answers are regenerated server-side from Musixmatch fetches plus round logic, and host banter is localized string templates (`lib/game/host-banter.ts`), not an LLM. When wired, the target model is `claude-opus-4-8`, all host/round generation will run server-side, and the browser will never see the key.
 
 ---
 
@@ -412,6 +419,6 @@ Judging: four criteria, **25% each**. This maps each feature to the criterion it
 
 ## 13. Stack (summary)
 
-Next.js (App Router, TypeScript) + Tailwind. Supabase (Postgres + Auth + RLS) for scores/challenges/leaderboards. Deploy on Replit (public demo URL). LLM = Anthropic Claude (`claude-opus-4-8`). TTS = ElevenLabs. Lyrics = Musixmatch. Optional stem separation = LALAL.AI (or the user's own Soundberry stem service).
+Next.js (App Router, TypeScript) + Tailwind. **Live today:** TTS = ElevenLabs, Lyrics = Musixmatch, optional stem separation = LALAL.AI (or the user's own Soundberry stem service), and an in-memory session store synced via ~1s HTTP polling. **⏳ Planned:** Supabase (Postgres + Auth + RLS) for scores/challenges/leaderboards, and an LLM layer = Anthropic Claude (target `claude-opus-4-8`) for round generation / host banter / mood. Deploy on Replit (public demo URL).
 
 Full setup and key-safety rules: [`README.md`](../README.md). Claude prompts P1–P6: [`PROMPTS.md`](./PROMPTS.md).

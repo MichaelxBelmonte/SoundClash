@@ -1,5 +1,12 @@
 # Soundclash
 
+![Soundclash](public/brand/wordmark.png)
+
+![Next.js](https://img.shields.io/badge/Next.js-15-000?logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 Soundclash is a zero-install music party game for the Musixmatch Musicathon 2026.
 One device hosts the room, players join on phones, and an AI host runs lyric-based
 mini-games powered by live Musixmatch data.
@@ -67,6 +74,25 @@ host picker for the pitch but never enters rotation.
 | LALAL.AI | Stem separation lab | Wired |
 | Supabase | Persistence/realtime target | Planned for room hardening |
 | Anthropic Claude | Future host banter/mood/round generation | Planned |
+
+## Status & known limitations
+
+This is a working demo built for the Musicathon. We'd rather be precise about what
+is live than overclaim — what's shipped today and what's intentionally still ahead:
+
+- **Sessions are in-memory.** Rooms live in the server process, so a redeploy/restart
+  clears active rooms. The app is pinned to a **single always-on instance**; moving the
+  store to Redis/Supabase (planned) is what enables persistence and multi-instance.
+- **No auth on the API routes.** Any client with the 4-char room code can drive the room.
+  That's fine for a trusted in-person party/demo; host/player tokens are planned hardening.
+- **Host banter is template-driven.** Localized templates (`lib/game/host-banter.ts`)
+  voiced by ElevenLabs. Claude-generated banter/mood is planned, not yet wired.
+- **Combo/Encore scoring** is live in solo mode; party rounds currently score base + speed
+  (per-player streak wiring is in progress).
+
+The `docs/` folder additionally documents a **target architecture** (Supabase, Claude,
+async challenges) that is a roadmap, not the current build — each doc flags what is
+implemented today versus planned.
 
 ## Local Setup
 

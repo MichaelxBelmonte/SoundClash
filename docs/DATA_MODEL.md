@@ -1,5 +1,9 @@
 # Data Model & Supabase Schema
 
+> **Status — TARGET architecture, NOT yet built.** This document describes the *planned* persistence layer. The Supabase/Postgres schema (`profiles` / `games` / `rounds` / `challenges` / `scores`, the RLS policies, and the `leaderboard_global` view), the Claude round/text regeneration, and the share-slug challenge flow are all **PLANNED — not implemented**. There is no `@supabase` or `@anthropic-ai` dependency and no `supabase/` directory in the repo today.
+> **What actually runs today** is an in-memory session store — `lib/server/session-store.ts` (a module-global `Map`, per-instance, no DB), with `PartySession` / `SessionRound` / `SessionPlayer` types and host↔player sync over ~1s HTTP polling. There is NO database and NO realtime service.
+> For the live feature set and limitations, see [`../README.md`](../README.md) (its "Status & known limitations" section).
+
 Soundclash persists scores, challenges, and leaderboards in Supabase (Postgres + Auth + RLS). This document is the canonical schema reference: ready-to-run DDL, Row Level Security policies, indexes, and the persisted-vs-runtime split that keeps the project compliant with Musixmatch terms.
 
 Sibling docs:
@@ -28,14 +32,16 @@ If a column would ever hold a lyric, a mondegreen decoy, or a correct answer str
 
 ## Schema overview
 
-| Table | Purpose | Holds lyric text? |
-|---|---|---|
-| `profiles` | One row per authed user (extends `auth.users`); display name + host persona | No |
-| `games` | A configured game instance: mode + config + creator | No |
-| `rounds` | Ordered references to lyric lines (track_id + line_index + round_type + seed) | **No — by design** |
-| `challenges` | Async challenge: a `share_slug` linking friends to the same game/rounds | No |
-| `scores` | A player's result on a game (authed via `profiles`, or guest via `anon_name`) | No |
-| `leaderboard_global` (view) | Top scores joined to display names | No |
+> ⏳ **Planned.** None of these tables exist yet — the runtime store keeps everything in memory (see status banner above).
+
+| Table | Purpose | Holds lyric text? | Status |
+|---|---|---|---|
+| `profiles` | One row per authed user (extends `auth.users`); display name + host persona | No | ⏳ Planned |
+| `games` | A configured game instance: mode + config + creator | No | ⏳ Planned |
+| `rounds` | Ordered references to lyric lines (track_id + line_index + round_type + seed) | **No — by design** | ⏳ Planned |
+| `challenges` | Async challenge: a `share_slug` linking friends to the same game/rounds | No | ⏳ Planned |
+| `scores` | A player's result on a game (authed via `profiles`, or guest via `anon_name`) | No | ⏳ Planned |
+| `leaderboard_global` (view) | Top scores joined to display names | No | ⏳ Planned |
 
 RLS is enabled on every table. Anonymous casual play is allowed via `scores.anon_name` (challenge guests, no auth); authed users play via `profiles`.
 
@@ -331,20 +337,21 @@ The `copyright` field on the runtime `Round` carries the Musixmatch `lyrics_copy
 
 ## Server-side access and key safety
 
-All provider calls — Musixmatch, Claude, ElevenLabs, and any privileged write (e.g. inserting `rounds`) — happen **only** in the Next.js server (route handlers / server actions) acting as a proxy. The browser never sees server-side secrets.
+All provider calls happen **only** in the Next.js server (route handlers / server actions) acting as a proxy — the browser never sees server-side secrets. Today this covers Musixmatch (`/api/mxm/*`), ElevenLabs (`/api/host/speak`), and LALAL.AI (`/api/lalal/*`). The Claude calls and any privileged DB write (e.g. inserting `rounds`) below are ⏳ **Planned** — Claude integration and the Supabase tables are not built yet.
 
 Environment variables (server-side secrets unless prefixed `NEXT_PUBLIC`):
 
-| Var | Scope | Used for |
-|---|---|---|
-| `MXM_KEY` | server | Musixmatch API |
-| `ELEVENLABS_API_KEY` | server | ElevenLabs TTS (`xi-api-key` header) |
-| `ANTHROPIC_API_KEY` | server | Claude (`claude-opus-4-8`) |
-| `SUPABASE_DB_PASSWORD` | server | Migrations / privileged DB access |
-| `SUPABASE_PROJECT_REF` | server | Supabase project reference; keep the real value in `.env.local` / deployment secrets only. |
-| `NEXT_PUBLIC_SUPABASE_URL` | public | Browser Supabase client |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public | Browser Supabase client (RLS-bounded) |
+| Var | Scope | Used for | Status |
+|---|---|---|---|
+| `MXM_KEY` | server | Musixmatch API | Live |
+| `ELEVENLABS_API_KEY` | server | ElevenLabs TTS (`xi-api-key` header) | Live |
+| `LALAL_API_KEY` | server | LALAL.AI stem separation | Live |
+| `ANTHROPIC_API_KEY` | server | Claude (`claude-opus-4-8`) | ⏳ Planned (no `@anthropic-ai` dep; host banter is string templates, not an LLM) |
+| `SUPABASE_DB_PASSWORD` | server | Migrations / privileged DB access | ⏳ Planned |
+| `SUPABASE_PROJECT_REF` | server | Supabase project reference; keep the real value in `.env.local` / deployment secrets only. | ⏳ Planned |
+| `NEXT_PUBLIC_SUPABASE_URL` | public | Browser Supabase client | ⏳ Planned |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public | Browser Supabase client (RLS-bounded) | ⏳ Planned |
 
-The publishable key reaches the client and is bound by the RLS policies above — it can read leaderboards and insert a guest/own score, but cannot write `rounds` or mutate other users' data. Secrets live only in `.env.local` (gitignored); the repo is public at `github.com/MichaelxBelmonte/LyricRoyale`.
+The publishable key reaches the client and is bound by the RLS policies above — it can read leaderboards and insert a guest/own score, but cannot write `rounds` or mutate other users' data. Secrets live only in `.env.local` (gitignored); the repo is public at `github.com/MichaelxBelmonte/SoundClash`.
 
 > **Rotate before submission:** the ElevenLabs key and the Supabase DB password were pasted in chat during development — rotate both. See [`README.md`](../README.md).

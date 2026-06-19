@@ -30,3 +30,13 @@ pnpm-debug.log*
 *.wav
 !public/audio/
 !public/audio/*.mp3
+
+# Asset grezzi di generazione (immagini/video) fuori da public/ — gli asset
+# curati vivono in public/brand/. Evita di committare scratch dei tool AI.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.mov
+!public/**

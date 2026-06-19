@@ -1,5 +1,7 @@
 # System Architecture
 
+> **Status — target vs. current build.** This document describes the *target* architecture, parts of which are not yet built. In particular, **Supabase (Postgres/Auth/RLS), leaderboards, all DB persistence, and Anthropic Claude (round generation, mood, host banter) are PLANNED, not implemented.** Likewise the routes `/api/round`, `/api/host`, `/api/mood`, `/api/challenge`, `/api/stems`, and the async `/c/[slug]` challenge flow do not exist yet. The current build uses an **in-memory session store** (`lib/server/session-store.ts`, a per-instance Map, no DB) synced via ~1s HTTP polling, and templated (non-LLM) host banter. For exactly what is live today, see the "Status & known limitations" section of [../README.md](../README.md).
+
 Soundclash is a web party game built on real song lyrics with an AI host, for the Musixmatch Musicathon 2026. This document describes how the system is structured: the trust boundary between the browser and the providers, the App Router folder layout, the end-to-end data flow for one round, room state, and the rationale behind each technology choice.
 
 This is the engineering source of truth for *how the pieces fit together*. For *what* the product does, see [PRODUCT_SPEC.md](./PRODUCT_SPEC.md). For visual implementation rules, see [BRAND_SYSTEM.md](./BRAND_SYSTEM.md). For the current room/autopilot plan, see [PARTY_ROOM_PLAN.md](./PARTY_ROOM_PLAN.md).
@@ -10,7 +12,7 @@ This is the engineering source of truth for *how the pieces fit together*. For *
 
 ## 1. High-Level Diagram
 
-Everything outbound to a third-party provider goes through the Next.js server. The browser never talks to Musixmatch, ElevenLabs, Claude, or LALAL.AI directly. The browser *does* talk to Supabase directly — but only through the publishable key, with Row-Level Security as the enforcement layer.
+Everything outbound to a third-party provider goes through the Next.js server. The browser never talks to Musixmatch, ElevenLabs, or LALAL.AI directly. (⏳ Planned: Claude as a fourth provider behind the same proxy.) In the target architecture the browser *does* talk to Supabase directly — but only through the publishable key, with Row-Level Security as the enforcement layer. **Today there is no Supabase and no Claude:** session state lives in an in-memory store on the server and host banter is templated, so the Supabase channel and the Claude box below are PLANNED.
 
 ```
                             ┌──────────────────────────────────────────────┐
@@ -50,10 +52,10 @@ Everything outbound to a third-party provider goes through the Next.js server. T
 
 **Two distinct channels to data:**
 
-| Channel | Who initiates | Auth | Used for |
-|---|---|---|---|
-| Provider proxy | Browser → our server → provider | Server-side secrets in `process.env` | Lyrics, TTS, Claude generation, stems |
-| Supabase | Browser → Supabase (direct) | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` + RLS | Scores, challenges, leaderboards, profiles |
+| Channel | Who initiates | Auth | Used for | Status |
+|---|---|---|---|---|
+| Provider proxy | Browser → our server → provider | Server-side secrets in `process.env` | Lyrics, TTS, stems (Claude generation ⏳ planned) | Implemented (Claude ⏳ Planned) |
+| Supabase | Browser → Supabase (direct) | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` + RLS | Scores, challenges, leaderboards, profiles | ⏳ Planned |
 
 ---
 
@@ -63,7 +65,7 @@ Everything outbound to a third-party provider goes through the Next.js server. T
 
 ### Why a proxy at all
 
-Musixmatch, ElevenLabs, Claude, and LALAL.AI all authenticate with a long-lived secret. If any of those secrets shipped in a client bundle — even minified, even behind an "internal" flag — it would be trivially extractable from the browser and immediately abusable (quota theft, billing, abuse attribution back to us). A public GitHub repo (`github.com/MichaelxBelmonte/LyricRoyale`) makes the bar even higher: nothing secret can live in committed source either.
+Musixmatch, ElevenLabs, Claude, and LALAL.AI all authenticate with a long-lived secret. If any of those secrets shipped in a client bundle — even minified, even behind an "internal" flag — it would be trivially extractable from the browser and immediately abusable (quota theft, billing, abuse attribution back to us). A public GitHub repo (`github.com/MichaelxBelmonte/SoundClash`) makes the bar even higher: nothing secret can live in committed source either.
 
 The pattern is: **the browser only ever calls our own origin.** Our server is the single place that holds provider secrets and the single place that calls providers.
 
@@ -71,18 +73,18 @@ The pattern is: **the browser only ever calls our own origin.** Our server is th
 
 Next.js treats any env var prefixed `NEXT_PUBLIC_` as inlined-into-the-client and everything else as server-only. We lean on that split exactly as the brief specifies.
 
-| Variable | Exposure | Where it is read |
-|---|---|---|
-| `MXM_KEY` | Server-only | Route handlers / server actions calling Musixmatch |
-| `ELEVENLABS_API_KEY` | Server-only | Route handler calling ElevenLabs TTS (`xi-api-key` header) |
-| `ANTHROPIC_API_KEY` | Server-only | Server-side `@anthropic-ai/sdk` client |
-| `SUPABASE_DB_PASSWORD` | Server-only | Migrations / direct Postgres only — never at runtime in app code |
-| `SUPABASE_PROJECT_REF` | Server-only | CLI / migrations tooling |
-| `LALAL_API_KEY` | Server-only | Route handler calling LALAL.AI (optional, karaoke) |
-| `NEXT_PUBLIC_SUPABASE_URL` | Public | supabase-js in the browser |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public | supabase-js in the browser |
+| Variable | Exposure | Where it is read | Status |
+|---|---|---|---|
+| `MXM_KEY` | Server-only | Route handlers / server actions calling Musixmatch | Implemented |
+| `ELEVENLABS_API_KEY` | Server-only | Route handler calling ElevenLabs TTS (`xi-api-key` header) | Implemented |
+| `LALAL_API_KEY` | Server-only | Route handler calling LALAL.AI (optional, karaoke) | Implemented |
+| `ANTHROPIC_API_KEY` | Server-only | Server-side `@anthropic-ai/sdk` client | ⏳ Planned |
+| `SUPABASE_DB_PASSWORD` | Server-only | Migrations / direct Postgres only — never at runtime in app code | ⏳ Planned |
+| `SUPABASE_PROJECT_REF` | Server-only | CLI / migrations tooling | ⏳ Planned |
+| `NEXT_PUBLIC_SUPABASE_URL` | Public | supabase-js in the browser | ⏳ Planned |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public | supabase-js in the browser | ⏳ Planned |
 
-Only the two `NEXT_PUBLIC_SUPABASE_*` values reach the browser. They are *designed* to be public: the publishable key grants nothing on its own — Row-Level Security on every table is what actually authorizes reads and writes.
+⏳ Planned: only the two `NEXT_PUBLIC_SUPABASE_*` values will reach the browser. They are *designed* to be public: the publishable key grants nothing on its own — Row-Level Security on every table is what actually authorizes reads and writes. (None of the Supabase or Anthropic variables are used in the current build.)
 
 ### Secret hygiene
 
@@ -99,7 +101,9 @@ The proxy is not a dumb pass-through. Each provider route handler:
 3. Returns only what the client needs for transient display. Lyric *text* is returned for rendering but never persisted (see §4 and §5).
 
 ```ts
-// app/api/round/route.ts — illustrative shape of a proxy route handler.
+// app/api/round/route.ts — ⏳ PLANNED, ILLUSTRATIVE shape of a proxy route handler.
+// This route does not exist yet (no Claude). The real proxy routes today are
+// app/api/mxm/*, app/api/host/speak, app/api/lalal/*, app/api/rounds/*, app/api/sessions/*.
 // Secrets are read here, on the server, and never serialized to the client.
 import { NextRequest, NextResponse } from "next/server";
 
@@ -119,73 +123,78 @@ export async function POST(req: NextRequest) {
 
 ## 3. Folder Structure (Next.js App Router)
 
-A pragmatic App Router layout for a solo, ~5-day build. The hard boundary is `lib/server/` vs `lib/client/`: anything that imports a server-side secret must live under `lib/server/` (or directly in a route handler / server action) so it can never be pulled into a client component bundle.
+A pragmatic App Router layout for a solo, ~5-day build. The hard boundary is `lib/server/` vs. client modules: anything that imports a server-side secret must live under `lib/server/` (or directly in a route handler / server action) so it can never be pulled into a client component bundle. The tree below is the **current, real layout**; entries tagged ⏳ Planned do not exist yet.
 
 ```
-LyricRoyale/
+soundclash/
 ├─ app/
 │  ├─ layout.tsx                 # root layout, Tailwind, fonts
 │  ├─ page.tsx                   # landing / create-or-join
 │  ├─ globals.css
 │  │
-│  ├─ play/
-│  │  └─ [gameId]/
-│  │     └─ page.tsx             # the game loop screen (client component)
-│  │
-│  ├─ c/
-│  │  └─ [slug]/
-│  │     └─ page.tsx             # async challenge entry (resolves share_slug)
-│  │
-│  ├─ leaderboard/
-│  │  └─ page.tsx                # global + daily leaderboards
+│  ├─ host/
+│  │  ├─ new/page.tsx            # create a session
+│  │  └─ [code]/page.tsx         # TV/stage screen
+│  ├─ join/page.tsx              # bind a phone to a room
+│  ├─ player/
+│  │  └─ [code]/page.tsx         # phone controller
+│  ├─ solo/page.tsx              # single-screen solo flow
 │  │
 │  └─ api/                       # ── route handlers = the provider proxy ──
-│     ├─ round/route.ts          # POST: fetch lyrics live + Claude → Round
-│     ├─ host/route.ts           # POST: Claude banter → ElevenLabs TTS (audio)
-│     ├─ mood/route.ts           # POST: Claude mood/theme (replaces MXM 403 endpoint)
-│     ├─ challenge/route.ts      # POST: create challenge + share_slug
-│     └─ stems/route.ts          # POST: LALAL.AI stem separation (optional, karaoke)
+│     ├─ mxm/
+│     │  ├─ search/route.ts      # GET: Musixmatch track.search (proxy)
+│     │  ├─ track/route.ts       # GET: Musixmatch track + lyrics (proxy)
+│     │  └─ richsync/route.ts    # GET: Musixmatch richsync (proxy)
+│     ├─ host/
+│     │  └─ speak/route.ts       # POST: ElevenLabs TTS (audio)
+│     ├─ lalal/
+│     │  ├─ stems/route.ts       # POST: LALAL.AI stem separation (optional)
+│     │  └─ stems/[taskId]/route.ts  # GET: poll stem task
+│     ├─ rounds/
+│     │  ├─ check/route.ts       # POST: server-side answer regeneration/check
+│     │  └─ finish-line/route.ts # POST: finish-the-line round logic
+│     └─ sessions/
+│        ├─ route.ts             # POST: create session
+│        └─ [code]/
+│           ├─ route.ts          # GET poll / PATCH reveal / lobby
+│           ├─ join/route.ts     # POST: player joins
+│           └─ round/route.ts    # POST start/advance, PATCH submit answer
 │
 ├─ components/
-│  ├─ rounds/
-│  │  ├─ FinishTheLine.tsx
-│  │  ├─ NextLine.tsx
-│  │  ├─ NameThatSong.tsx
-│  │  ├─ Misheard.tsx
-│  │  └─ SpeedLyrics.tsx         # stretch
-│  ├─ HostBubble.tsx             # renders host line + plays TTS audio
-│  ├─ RoundTimer.tsx             # speed-bonus countdown
-│  ├─ ScoreReveal.tsx
-│  ├─ CopyrightBadge.tsx         # shows Musixmatch lyrics_copyright + fires tracking pixel
-│  └─ ShareCard.tsx              # share_slug link + clip
+│  ├─ app/                       # TopBar, BottomNav
+│  ├─ audio/                     # AudioDirector, HomeWaveform
+│  ├─ battle/                    # DuelResult, MatchResult
+│  ├─ brand/                     # Logo, Button, JCard, BrandIntro, …
+│  ├─ onboarding/                # Soundcheck
+│  ├─ richsync/                  # LiveLyricPreview
+│  ├─ rounds/                    # FinishLineGame
+│  ├─ search/                    # SearchExperience, SearchForm, TrackResults
+│  ├─ session/                   # HostRoom, PlayerRoom, JoinSession, AudioConsole,
+│  │                             #   CreateSession, JoinQr, MiniGameArt, MusixmatchTracking
+│  ├─ team/                      # TeamBuilder, TeamSummary
+│  └─ ui/                        # Avatar, Icon
 │
 ├─ lib/
 │  ├─ server/                    # SERVER-ONLY. Imports secrets. Never imported by a client component.
-│  │  ├─ musixmatch.ts           # track.search / lyrics.get / subtitle.get / richsync.get / matcher
-│  │  ├─ claude.ts               # @anthropic-ai/sdk client (ANTHROPIC_API_KEY)
-│  │  ├─ elevenlabs.ts           # TTS POST /v1/text-to-speech/{voice_id}
+│  │  ├─ musixmatch.ts           # track.search / track + lyrics / richsync (MXM_KEY)
+│  │  ├─ elevenlabs.ts           # TTS POST /v1/text-to-speech/{voice_id} (composeMusic unused)
 │  │  ├─ lalal.ts                # stem separation (optional)
-│  │  ├─ round-builder.ts        # orchestrates fetch + Claude → runtime Round
-│  │  ├─ scoring.ts              # correctness + speed-bonus / karaoke scoring (server-authoritative)
-│  │  └─ supabase-admin.ts       # service-role client for server-side writes when needed
+│  │  └─ session-store.ts        # in-memory active-session store (module-global Map, no DB)
 │  │
-│  ├─ client/
-│  │  └─ supabase.ts             # browser supabase-js (NEXT_PUBLIC_* only)
-│  │
-│  ├─ prompts/                   # Claude prompt templates P1–P6 (see PROMPTS.md)
-│  │  ├─ round.ts                # P1, P2, P3
-│  │  ├─ mood.ts                 # P4
-│  │  └─ host.ts                 # P5, P6
-│  │
-│  └─ types.ts                   # Round, RoundType, shared DB row types
+│  ├─ game/                      # artists, challenge, finish-line, host-banter (templates),
+│  │                             #   identity, scoring
+│  ├─ session/                   # mini-games (9), avatars, types
+│  ├─ audio/                     # soundtrack
+│  ├─ i18n.ts
+│  └─ types.ts                   # shared runtime types
 │
-├─ supabase/
-│  └─ migrations/                # SQL schema + RLS policies (references-only model)
-│
-├─ public/                       # static assets, cover image
+├─ public/                       # static assets
+│  ├─ audio/
+│  └─ brand/
 │
 ├─ .env.example                  # variable names only (committed)
 ├─ .env.local                    # secrets (gitignored)
+├─ README.md
 └─ docs/
    ├─ ARCHITECTURE.md            # this file
    ├─ PRODUCT_SPEC.md
@@ -193,16 +202,20 @@ LyricRoyale/
    └─ PROMPTS.md
 ```
 
+> ⏳ **Planned, not yet present:** `lib/client/supabase.ts` (browser supabase-js), `lib/server/claude.ts` + `lib/server/supabase-admin.ts`, `lib/prompts/` (Claude prompts P1–P6), `supabase/migrations/` (SQL + RLS), and the `app/play/[gameId]`, `app/c/[slug]`, `app/leaderboard` routes. There is currently **no** `@supabase` or `@anthropic-ai` dependency in `package.json`.
+
 **Conventions:**
 
 - `app/api/*/route.ts` route handlers and inline server actions are the *only* code that reads provider secrets.
 - `lib/server/*` is the shared implementation those handlers call; it is server-only by construction and never reaches a `"use client"` module.
-- `lib/client/supabase.ts` is the single browser Supabase entry point and touches only `NEXT_PUBLIC_*`.
-- `lib/prompts/*` holds the strict-JSON Claude prompts; their full text lives in [PROMPTS.md](./PROMPTS.md).
+- ⏳ Planned: `lib/client/supabase.ts` will be the single browser Supabase entry point and touch only `NEXT_PUBLIC_*`.
+- ⏳ Planned: `lib/prompts/*` will hold the strict-JSON Claude prompts; their full text lives in [PROMPTS.md](./PROMPTS.md). Today, host banter is templated, non-LLM strings in `lib/game/host-banter.ts`.
 
 ---
 
 ## 4. End-to-End Data Flow for One Round
+
+> ⏳ **Planned target.** This section describes the intended Claude- and Supabase-backed round flow. It is **not** how the current build works: there is no `/api/round` route, no Claude call, and no Supabase `rounds`/`scores` persistence. Today, rounds come from `lib/session/mini-games.ts`, answer checking is server-side in `/api/rounds/check` and `/api/rounds/finish-line`, and live session state is held in the in-memory store (§5).
 
 A round is *generated live and shown transiently*. The database stores only references — `track_id`, `line_index`, `round_type`, and a `seed` — never lyric text. The actual prompt/options/answer are rebuilt at play time from a live Musixmatch fetch plus Claude. This is the compliance backbone of the whole system.
 
@@ -287,9 +300,9 @@ round from a track reference, a mini-game type, and a seed via a live Musixmatch
 fetch plus deterministic server-side round logic. No lyric text changes hands
 through persistence.
 
-### Why Claude derives mood/theme
+### Why Claude derives mood/theme (⏳ Planned)
 
-`track.lyrics.mood.get` returns **403 FORBIDDEN** on our Musixmatch key. Instead, `POST /api/mood` sends the full lyrics (which *are* available — `track.lyrics.get` returns 200 with full, non-truncated text) to Claude (prompt **P4**) and gets back a strict-JSON mood/theme classification. Lyric text used in P4 is transient — never logged, never stored.
+`track.lyrics.mood.get` returns **403 FORBIDDEN** on our Musixmatch key. The planned mitigation is a `POST /api/mood` route (not yet built) that sends the full lyrics (which *are* available — `track.lyrics.get` returns 200 with full, non-truncated text) to Claude (prompt **P4**) and gets back a strict-JSON mood/theme classification. Lyric text used in P4 is transient — never logged, never stored.
 
 ---
 
@@ -316,7 +329,7 @@ friends replay the same reference set later. This should reuse the same
 references-only rule: share `track_id`, `round_type`, `seed`, and position, never
 lyric text.
 
-### How it works
+### How it works (⏳ Planned — `/api/challenge`, `/c/[slug]`, and Supabase below do not exist yet)
 
 ```
   Challenger                    Server                         Friend (later)
@@ -356,9 +369,11 @@ Because comparison is asynchronous and read-time, the system needs no realtime i
 
 ---
 
-## 6. Data Model (Supabase / Postgres)
+## 6. Data Model (Supabase / Postgres) — ⏳ Planned
 
-References-only by design. RLS enabled on every table. These are the canonical definitions — see `supabase/migrations/` for the executable SQL plus policies.
+> ⏳ **Planned target, not built.** There is no Supabase project, no `supabase/migrations/` directory, and no `@supabase` dependency in the current build. The schema below is the intended persistence layer; today the only "store" is the in-memory session store in `lib/server/session-store.ts`.
+
+References-only by design. RLS enabled on every table. These are the canonical *planned* definitions — the executable SQL plus policies under `supabase/migrations/` does not exist yet.
 
 ```sql
 -- profiles: one row per authenticated user
@@ -423,23 +438,24 @@ The `rounds` table is intentionally text-free: it stores the reference quadruple
 
 ## 7. State Management
 
-The state strategy follows the asynchronous, server-authoritative nature of the game. There is no global client store and no realtime sync.
+The state strategy follows the server-authoritative nature of the game. There is no global client store. Today, host/player sync is **~1s HTTP polling against the in-memory session store** (rows tagged ⏳ Planned describe the target Supabase model, not what runs now).
 
-| State | Lives where | Why |
-|---|---|---|
-| Round content (`prompt`/`options`/`answer`) | Server-built, held in the play screen's React component state for the round's lifetime | Transient by compliance; never persisted, never lifted into a global store |
-| Current game progress (which `position`, score so far) | React component state in `app/play/[gameId]/page.tsx` | A single-screen flow; local `useState`/`useReducer` is sufficient |
-| Timer / speed-bonus countdown | Local component state (`RoundTimer`) | UI-only, per-round |
-| Selected host persona | `profiles.host_persona` (authed) or local state (guest) | Persona is a small, durable preference |
-| Scores, challenges, leaderboards | Supabase (server of record) | Durable, queried at read-time; RLS-guarded |
-| Auth session | supabase-js (browser) + cookie-bridged to server for server actions | Standard Supabase Auth/SSR pattern |
+| State | Lives where | Why | Status |
+|---|---|---|---|
+| Round content (`prompt`/`options`/`answer`) | Server-built, held in the play screen's React component state for the round's lifetime | Transient by compliance; never persisted, never lifted into a global store | Implemented (server-side answer regen) |
+| Live session (host/players/current round) | `lib/server/session-store.ts` (in-memory Map), polled ~1s by clients | Smallest path to a shared room with no infra | Implemented |
+| Current game progress (which `position`, score so far) | React component state in the player/host screens | A single-flow game; local `useState`/`useReducer` is sufficient | Implemented |
+| Timer / speed-bonus countdown | Local component state | UI-only, per-round | Implemented |
+| Selected host persona | `profiles.host_persona` (authed) or local state (guest) | Persona is a small, durable preference | ⏳ Planned (DB side) |
+| Scores, challenges, leaderboards | Supabase (server of record) | Durable, queried at read-time; RLS-guarded | ⏳ Planned |
+| Auth session | supabase-js (browser) + cookie-bridged to server for server actions | Standard Supabase Auth/SSR pattern | ⏳ Planned |
 
 **Principles:**
 
 - **Server is authoritative for anything that counts.** Round generation and scoring happen on the server so neither the round answer nor the score can be tampered with from the client. The client renders and reports interactions; it does not own the truth.
 - **No global client state library.** A Jackbox/Kahoot-style single-flow game doesn't need Redux/Zustand. Local component state plus server fetches keeps the codebase small for a 5-day build.
 - **Fetch, don't subscribe.** Leaderboards and challenge comparisons are read on demand (page load / refresh), consistent with the no-realtime design.
-- **Supabase as the only persistent store**, accessed directly from the browser through the publishable key + RLS for reads/writes the user is allowed to make, and through a server-side service-role client only when a write must be authoritative (e.g. server-validated scoring).
+- ⏳ Planned: **Supabase as the only persistent store**, accessed directly from the browser through the publishable key + RLS for reads/writes the user is allowed to make, and through a server-side service-role client only when a write must be authoritative (e.g. server-validated scoring). Until then, there is no persistence — session state lives only in the in-memory store and is lost on restart.
 
 ---
 
@@ -449,13 +465,13 @@ The state strategy follows the asynchronous, server-authoritative nature of the 
 |---|---|
 | **Next.js (App Router, TypeScript)** | Route handlers and server actions give us a first-class server tier in the same project as the UI — exactly what the proxy pattern needs. The `NEXT_PUBLIC_` convention makes the secret boundary explicit and enforceable. TypeScript lets the canonical `Round` shape be a real type shared across server and client. |
 | **Tailwind** | Fast, consistent styling for a game UI under a 5-day deadline; no separate design system to build. |
-| **Supabase (Postgres + Auth + RLS)** | One managed service covers the database, authentication, and authorization. RLS lets the browser talk to the DB directly with the publishable key without trusting the client — the database enforces who can read/write what. Anonymous challenge guests (`anon_name`) and authed players (`profiles`) coexist under one policy model. |
-| **Anthropic Claude (`claude-opus-4-8`)** | Drives live round generation (P1–P3), the mood/theme analysis that replaces the 403 Musixmatch endpoint (P4), and the host persona + banter (P5–P6). All prompts return strict JSON for reliable parsing. We default to adaptive thinking (`thinking: {type: "adaptive"}`) for the generation prompts and keep lyric usage transient (never logged/stored). Calls are made server-side via `@anthropic-ai/sdk` so `ANTHROPIC_API_KEY` never reaches the browser. |
+| **Supabase (Postgres + Auth + RLS)** — ⏳ Planned | One managed service covers the database, authentication, and authorization. RLS lets the browser talk to the DB directly with the publishable key without trusting the client — the database enforces who can read/write what. Anonymous challenge guests (`anon_name`) and authed players (`profiles`) coexist under one policy model. *Not yet adopted: no `@supabase` dependency; persistence is currently the in-memory session store.* |
+| **Anthropic Claude (`claude-opus-4-8`)** — ⏳ Planned | Intended to drive live round generation (P1–P3), the mood/theme analysis that replaces the 403 Musixmatch endpoint (P4), and the host persona + banter (P5–P6), all returning strict JSON, called server-side via `@anthropic-ai/sdk` so `ANTHROPIC_API_KEY` never reaches the browser. *Not yet adopted: no `@anthropic-ai/sdk` dependency. Host banter currently uses localized string templates in `lib/game/host-banter.ts` (not an LLM); rounds come from `lib/session/mini-games.ts`.* |
 | **ElevenLabs (TTS)** | The AI emcee's voice. Verified working: `POST /v1/text-to-speech/{voice_id}` returns `200 audio/mpeg`, auth via the `xi-api-key` header, on the creator tier (~131k credits). Selectable personalities map to different voices/prompts. Called only server-side. |
 | **Musixmatch (lyrics)** | The sponsor API and the heart of the game. Verified live: `track.search`, `track.lyrics.get` (full lyrics, not truncated), `track.subtitle.get` (line-level synced), `track.richsync.get` (word-level synced), and `matcher.track.get` all return 200. `track.lyrics.mood.get` is 403 on our key — handled by deriving mood with Claude. Heavy Musixmatch use directly serves the "Use of Musixmatch API" judging criterion. |
 | **LALAL.AI (optional)** | Stem separation for the karaoke stretch goal (vocal stem for pitch tracking), or the developer's own Soundberry stem service as an alternative. Optional and server-side only. |
 | **Replit (deploy)** | Gives a public demo URL with the same env vars re-entered as Secrets — the brief's chosen host. |
-| **No realtime layer** | A deliberate non-choice: the async `share_slug` model needs no sockets/presence, which removes an entire class of complexity and infrastructure from a solo 5-day build (see §5). |
+| **No realtime layer** | A deliberate non-choice: the shared room is kept in sync with ~1s HTTP polling against the in-memory store, and the planned async `share_slug` model needs no sockets/presence — removing an entire class of infrastructure from a solo 5-day build (see §5). (Supabase Realtime is a possible later upgrade.) |
 
 ### Compliance constraints that shaped the architecture
 

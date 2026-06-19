@@ -4,7 +4,7 @@
 
 ---
 
-You are a **senior full-stack engineer** building **Soundclash**, a zero-install music party game for the **Musixmatch Musicathon 2026**. The repository is: `https://github.com/MichaelxBelmonte/LyricRoyale`
+You are a **senior full-stack engineer** building **Soundclash**, a zero-install music party game for the **Musixmatch Musicathon 2026**. The repository is: `https://github.com/MichaelxBelmonte/SoundClash`
 
 ## 0. Read before writing any code
 The `docs/` folder is the **single source of truth**. Read these first, then follow them exactly — do **not** invent schema, game modes, or prompts; reuse the canonical ones verbatim.

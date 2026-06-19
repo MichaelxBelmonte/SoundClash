@@ -1,5 +1,7 @@
 # 5-Day Build Plan
 
+> **Status — target architecture, not current build.** This doc describes the *planned* 5-day build, not what ships today. **Supabase (Postgres/RLS/leaderboards), Anthropic Claude (round generation, host banter, mood), async `share_slug` challenges, and the `/api/round/generate`, `/api/host/banter`, `/api/mood`, `/api/challenge/*`, `/api/stems`, `/api/mxm/lyrics|subtitle|match` routes are PLANNED, not built.** What is live today: in-memory session store with ~1s HTTP polling (no DB), real Musixmatch/ElevenLabs/LALAL.AI proxies, server-side answer regeneration, 9 mini-games, and templated (non-LLM) host banter. See `../README.md` ("Status & known limitations") for exactly what runs today.
+
 Soundclash — a cassette/Y2K music party game built on real Musixmatch lyrics, phone controllers, and an AI host, for the Musixmatch Musicathon 2026.
 
 This plan sequences the build so judging-critical capabilities land first:
@@ -21,7 +23,7 @@ Sibling docs:
 
 - **All provider calls happen ONLY in Next.js server** (route handlers / server actions) acting as a proxy. The browser never sees `MXM_KEY`, `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`, `SUPABASE_DB_PASSWORD`, or `SUPABASE_PROJECT_REF`. Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` reach the client.
 - **References only, never lyric text.** A persisted round stores `track_id + line_index + round_type + seed`. The prompt/options/answer TEXT is regenerated LIVE (Musixmatch fetch + Claude) at play time and shown transiently. See `COMPLIANCE.md`.
-- **LLM = Claude `claude-opus-4-8`** for round generation, host banter, and mood/theme analysis. All Claude calls request strict JSON.
+- **LLM = Claude `claude-opus-4-8`** for round generation, host banter, and mood/theme analysis — ⏳ **Planned.** *Not built:* no `@anthropic-ai/sdk` dependency and no Claude calls exist today. Round answers are regenerated server-side without an LLM (`/api/rounds/check`, `/api/rounds/finish-line`), and host banter is localized string templates (`lib/game/host-banter.ts`). All planned Claude calls would request strict JSON.
 - **Secrets live only in `.env.local`** (gitignored). Rotate the ElevenLabs key and the Supabase DB password before submission — both were pasted in chat at some point.
 
 ---
@@ -46,11 +48,11 @@ Sibling docs:
 
 1. **Scaffold Next.js (App Router, TypeScript) + Tailwind.**
    ```bash
-   npx create-next-app@latest lyric-royale --ts --app --tailwind --eslint
+   npx create-next-app@latest soundclash --ts --app --tailwind --eslint
    ```
    Confirm `.env.local` is gitignored; copy `.env.example` → `.env.local` and fill values.
 
-2. **Supabase client wiring.** Browser client uses `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; the project ref stays in local/deployment secrets. Apply the schema (full DDL in `DATA_MODEL.md`):
+2. **Supabase client wiring — ⏳ Planned (not built).** *Today there is no database:* session state lives in an in-memory, per-instance `Map` (`lib/server/session-store.ts`) and host/player stay in sync via ~1s HTTP polling. No `@supabase` dependency, no `supabase/` directory, no tables. The schema below is the planned target. Browser client would use `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; the project ref stays in local/deployment secrets. Apply the schema (full DDL in `DATA_MODEL.md`):
    ```sql
    create table profiles (
      id uuid primary key references auth.users,
@@ -61,13 +63,14 @@ Sibling docs:
    -- games, rounds, challenges, scores + leaderboard_global view
    -- rounds has NO lyric-text columns: track_id, line_index, round_type, seed.
    ```
-   Enable RLS on every table. Allow anonymous casual play via `anon_name` (challenge guests, no auth); authed users via `profiles`.
+   ⏳ **Planned:** enable RLS on every table; allow anonymous casual play via `anon_name` (challenge guests, no auth) and authed users via `profiles`.
 
-3. **Server proxy routes (the only place provider keys are used).** Create thin handlers that wrap Musixmatch, never exposing `MXM_KEY`:
+3. **Server proxy routes (the only place provider keys are used).** Thin handlers that wrap Musixmatch, never exposing `MXM_KEY`. **Live today** (`lib/server/musixmatch.ts`):
    - `GET /api/mxm/search` → `track.search` (200 OK)
-   - `GET /api/mxm/lyrics` → `track.lyrics.get` (200 OK, FULL lyrics)
+   - `GET /api/mxm/track` → track metadata lookup
    - `GET /api/mxm/richsync` → `track.richsync.get` (200 OK, WORD-level)
-   - `GET /api/mxm/match` → `matcher.track.get` (200 OK)
+
+   ⏳ **Planned** (not built): `GET /api/mxm/lyrics` → `track.lyrics.get`, `GET /api/mxm/subtitle` → `track.subtitle.get`, `GET /api/mxm/match` → `matcher.track.get`.
 
    Each response includes the Musixmatch `lyrics_copyright` and the tracking pixel/script payload so the client can fire it whenever lyrics show.
 
@@ -116,7 +119,7 @@ interface Round {
 
 ### Tasks
 
-1. **Round engine.** `POST /api/round/generate` takes a persisted round reference (`track_id + line_index + round_type + seed`), fetches the lyrics live (Musixmatch), calls Claude to produce the prompt/options/answer, and returns a transient `Round`. The text is never logged or stored. See prompts P1–P3 in `PROMPTS.md`:
+1. **Round engine — ⏳ partially built.** *Live today:* server-side answer regeneration via `/api/rounds/check` and `/api/rounds/finish-line` (no LLM, no persisted text), plus the 9 mini-games in `lib/session/mini-games.ts`. ⏳ **Planned (not built):** `POST /api/round/generate` that takes a persisted round reference (`track_id + line_index + round_type + seed`), fetches the lyrics live (Musixmatch), calls Claude to produce the prompt/options/answer, and returns a transient `Round`. The text is never logged or stored. See prompts P1–P3 in `PROMPTS.md`:
    - **P1** round generator for `finish_line` (hide last word(s), player types) and `next_line` (pick correct following line from 4).
    - **P3** `name_song` decoys (pick the correct song from 4 from a snippet).
    - All return strict JSON.
@@ -126,9 +129,9 @@ interface Round {
    - **Next Line** — show a line; player picks the correct following line from 4 options.
    - **Name That Song** — show a lyric snippet; player picks the correct song from 4 options.
 
-3. **Scoring.** Word games = correctness + speed bonus that decays with elapsed time. Persist results to `scores` (`points`, `accuracy`, `mode`, `player_id` or `anon_name`).
+3. **Scoring.** Word games = correctness + speed bonus that decays with elapsed time. ⏳ **Planned:** persist results to `scores` (`points`, `accuracy`, `mode`, `player_id` or `anon_name`) — today scores live only in the in-memory session store, not a DB.
 
-4. **Leaderboard.** Wire `leaderboard_global` (top scores joined to display names) into a board UI. Add daily filtering by `created_at`.
+4. **Leaderboard — ⏳ Planned (not built).** Wire `leaderboard_global` (top scores joined to display names) into a board UI; add daily filtering by `created_at`. Depends on Supabase; there is no `app/leaderboard` page today.
 
 ### Day 2 done when
 A player can complete a short game of 2–3 modes, see a score with a speed bonus, and appear on the global/daily leaderboard. Rounds persist only references.
@@ -141,21 +144,21 @@ A player can complete a short game of 2–3 modes, see a score with a speed bonu
 
 ### Tasks
 
-1. **Async challenge link.** On finishing a game, create a `challenges` row with a unique `share_slug` and optional `expires_at`. The slug link lets friends replay the **same rounds** (same `track_id + line_index + round_type + seed`) and try to beat the score. No lyric text travels in the shared challenge — the recipient's client regenerates rounds live (Musixmatch + Claude), preserving compliance.
-   - `POST /api/challenge/create` → returns `share_slug`.
-   - `GET /api/challenge/[slug]` → resolves the game + its rounds (references), loads transiently.
+1. **Async challenge link — ⏳ Planned (not built).** On finishing a game, create a `challenges` row with a unique `share_slug` and optional `expires_at`. The slug link lets friends replay the **same rounds** (same `track_id + line_index + round_type + seed`) and try to beat the score. No lyric text travels in the shared challenge — the recipient's client regenerates rounds live (Musixmatch + Claude), preserving compliance. None of this exists today (no Supabase, no `app/c/[slug]`).
+   - `POST /api/challenge/create` → returns `share_slug` (⏳ Planned).
+   - `GET /api/challenge/[slug]` → resolves the game + its rounds (references), loads transiently (⏳ Planned).
 
-2. **AI host — banter generation (Claude).** Selectable persona (Hype-Man / Deadpan British Judge / Diva), stored on `profiles.host_persona`. The host speaks at: round intro, correct answer, wrong answer, score reveal, game outro. Lines are short (1–2 sentences), punchy, no slurs, broadly tasteful.
+2. **AI host — banter generation (Claude) — ⏳ Planned (not built).** *Today* host banter is localized string templates in `lib/game/host-banter.ts` — there is no LLM and no `@anthropic-ai/sdk` dependency. Planned: a selectable persona (Hype-Man / Deadpan British Judge / Diva), stored on `profiles.host_persona`, speaking at round intro, correct answer, wrong answer, score reveal, game outro. Lines are short (1–2 sentences), punchy, no slurs, broadly tasteful.
    - **P5** host system prompt per persona; **P6** host banter per event (`round_intro`, `correct`, `wrong`, `score_reveal`, `game_outro`, `clip_caption`). Strict JSON. Keep lyric usage transient (never logged/stored).
-   - `POST /api/host/banter` → Claude (`claude-opus-4-8`) returns the line(s).
+   - `POST /api/host/banter` → Claude (`claude-opus-4-8`) returns the line(s) (⏳ Planned; route does not exist).
 
-3. **AI host — speech (ElevenLabs TTS).** Server proxy to `POST /v1/text-to-speech/{voice_id}` (verified 200 audio/mpeg, auth via `xi-api-key` header; creator tier, ~131k credits). Map each persona to a voice id.
-   - `POST /api/host/tts` → returns audio/mpeg; the client plays it at each game event.
+3. **AI host — speech (ElevenLabs TTS) — live today.** Server proxy to `POST /v1/text-to-speech/{voice_id}` (verified 200 audio/mpeg, auth via `xi-api-key` header; creator tier, ~131k credits), in `lib/server/elevenlabs.ts`.
+   - `POST /api/host/speak` → returns audio/mpeg; the client plays it at each game event. (The shipped route is `/api/host/speak`, not `/api/host/tts`.)
 
-4. **Mood/theme via Claude (replaces the 403 endpoint).** `track.lyrics.mood.get` is **403 FORBIDDEN** on the key. Use **P4** to derive mood/theme with Claude from the full lyrics instead — used to flavor host banter and round selection.
+4. **Mood/theme via Claude (replaces the 403 endpoint) — ⏳ Planned (not built).** `track.lyrics.mood.get` is **403 FORBIDDEN** on the key. Planned: use **P4** to derive mood/theme with Claude from the full lyrics instead — to flavor host banter and round selection. No `/api/mood` route exists today.
 
 ### Day 3 done when
-Finishing a game yields a working `share_slug` link a friend can play on the same rounds; the AI host speaks persona-appropriate banter (Claude-written, ElevenLabs-voiced) at each game event.
+Finishing a game yields a working `share_slug` link a friend can play on the same rounds; the AI host speaks persona-appropriate banter at each game event. ⏳ **Note:** the `share_slug` flow and Claude-written banter are Planned; today banter is templated (`lib/game/host-banter.ts`) and ElevenLabs-voiced via `/api/host/speak`.
 
 ---
 
@@ -165,7 +168,7 @@ Finishing a game yields a working `share_slug` link a friend can play on the sam
 
 ### Tasks
 
-1. **Misheard Lyrics** — show 4 versions of a line; player picks the REAL one among funny mondegreen decoys. Uses **P2** (misheard decoys, strict JSON).
+1. **Misheard Lyrics** — show 4 versions of a line; player picks the REAL one among funny mondegreen decoys. (The mini-game ships in `lib/session/mini-games.ts`; the **P2** Claude decoy generator is ⏳ Planned.)
 
 2. **Speed Lyrics** (stretch within the no-mic set) — timed rapid-fire across short lyric prompts, reusing the existing generators with a tight `time_limit_ms`.
 
@@ -227,7 +230,7 @@ Each risk has an explicit cut-line so we never blow the deadline chasing a nice-
 - [ ] **Description** — zero-install music party game on real Musixmatch lyrics: one host screen, phones as controllers, BEATBOT voice host, mostly automatic lyric mini-games, and a cassette/Y2K visual system.
 - [ ] **Cover image** — produced and attached.
 - [ ] **Demo** — public Replit demo URL **and/or** the 90-second demo video.
-- [ ] **Public repo** — `github.com/MichaelxBelmonte/LyricRoyale`, no secrets committed (`.env.local` gitignored).
-- [ ] **Meaningful Musixmatch usage** — `track.search`, `track.lyrics.get` (full lyrics), `track.subtitle.get`, `track.richsync.get` (WORD-level synced gameplay + karaoke timing), `matcher.track.get`; `lyrics_copyright` displayed and tracking pixel fired on every lyric display.
+- [ ] **Public repo** — `github.com/MichaelxBelmonte/SoundClash`, no secrets committed (`.env.local` gitignored).
+- [ ] **Meaningful Musixmatch usage** — live today: `track.search`, track metadata, `track.richsync.get` (WORD-level synced gameplay). ⏳ Planned: `track.lyrics.get` (full lyrics), `track.subtitle.get`, `matcher.track.get`, plus karaoke timing reuse. `lyrics_copyright` displayed and tracking pixel fired on every lyric display.
 - [ ] **Compliance verified** — references-only persistence (no lyric text stored), live refetch, no redistribution in shared challenges, non-commercial demo use only.
 - [ ] **Security** — `npm audit` clean; ElevenLabs key and Supabase DB password rotated; secrets only in `.env.local` / deployment secrets.
