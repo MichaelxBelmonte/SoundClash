@@ -24,12 +24,17 @@ pnpm-debug.log*
 .vscode/
 .idea/
 *.pem
+*.key
 
 # Artefatti audio di test
 *.mp3
 *.wav
 !public/audio/
 !public/audio/*.mp3
+
+# Local video/ad production workspace. Keep launch scripts, prompts, logs, raw
+# renders, keys, and generated media out of the public hackathon repo.
+/ad/
 
 # Asset grezzi di generazione (immagini/video) fuori da public/ — gli asset
 # curati vivono in public/brand/. Evita di committare scratch dei tool AI.
