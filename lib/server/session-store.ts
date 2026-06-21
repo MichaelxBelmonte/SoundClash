@@ -13,6 +13,13 @@ import {
   normalizeAnswer,
 } from "@/lib/game/finish-line";
 import { clampFloor, resolveDifficulty, tierForRound } from "@/lib/game/difficulty";
+import type { DifficultyTier, RoundDifficultyConfig } from "@/lib/game/difficulty";
+import {
+  buildBeatRoundSpec,
+  buildGenreRoundSpec,
+  isMusicGenerationAvailable,
+  prewarmBed,
+} from "@/lib/server/music-bed";
 import { ROUND_TIME_LIMIT_MS, scoreFinishLine, scoreRound } from "@/lib/game/scoring";
 import { getRichsyncLines, getTrackLyrics } from "@/lib/server/musixmatch";
 import { DEFAULT_BANTER_PACK, staticBanterPack, type BanterPack } from "@/lib/game/host-banter";
@@ -210,10 +217,13 @@ function cleanDeck(deck: SessionTrackRef[] | undefined): SessionTrackRef[] {
 }
 
 const NEEDS_RICHSYNC = new Set<MiniGameId>(["the_drop", "on_beat"]);
+// Generated-audio games need ElevenLabs Music configured (no real song / no lyrics).
+const GENERATED_AUDIO_GAMES = new Set<MiniGameId>(["genre_roulette", "beat_lock"]);
 
-// A game is playable on a given track only if its richsync requirement is met.
-// (the_drop / on_beat need word-level timing data, which most tracks lack.)
+// A game is playable on a given track only if its data requirement is met:
+// audio games need music generation; the_drop / on_beat need richsync timing.
 function isPlayable(game: MiniGameId, hasRichsync: boolean): boolean {
+  if (GENERATED_AUDIO_GAMES.has(game)) return isMusicGenerationAvailable();
   return !NEEDS_RICHSYNC.has(game) || hasRichsync;
 }
 
@@ -311,6 +321,62 @@ function promptKeyFor(round: SessionRound): string {
   return normalizeAnswer(round.prompt ?? "");
 }
 
+// Generated-audio rounds (Genre Roulette / Beat Lock): no lyrics, the puzzle is a
+// freshly generated instrumental bed. Synchronous — the bed pre-warms in the
+// background and the client streams it from /api/music.
+function buildAudioRound(input: {
+  miniGame: MiniGameId;
+  track: SessionTrackRef;
+  roundIndex: number;
+  tier: DifficultyTier;
+  diff: RoundDifficultyConfig;
+  seed: number;
+  startedAt: number;
+}): SessionRound {
+  const common = {
+    index: input.roundIndex,
+    miniGame: input.miniGame,
+    trackId: input.track.trackId,
+    trackName: input.track.trackName,
+    artistName: input.track.artistName,
+    hasRichsync: input.track.hasRichsync,
+    seed: input.seed,
+    difficulty: input.tier,
+    timeLimitMs: input.diff.timeLimitMs,
+    startedAt: input.startedAt,
+    endsAt: input.startedAt + input.diff.timeLimitMs,
+    status: "answering" as const,
+    answers: [],
+  };
+  if (input.miniGame === "genre_roulette") {
+    const spec = buildGenreRoundSpec(input.seed, input.diff.optionCount, input.diff.decoySimilarity);
+    prewarmBed(spec.audioUrl);
+    return {
+      ...common,
+      title: "Genre Roulette",
+      instruction: spec.instruction,
+      prompt: "",
+      answerType: "choice",
+      options: spec.options,
+      solution: spec.solution,
+      audioUrl: spec.audioUrl,
+    };
+  }
+  const spec = buildBeatRoundSpec(input.seed, input.tier);
+  prewarmBed(spec.audioUrl);
+  return {
+    ...common,
+    title: "Beat Lock",
+    instruction: spec.instruction,
+    prompt: "",
+    answerType: "tap",
+    solution: "",
+    audioUrl: spec.audioUrl,
+    bpm: spec.bpm,
+    tapWindowMs: spec.tapWindowMs,
+  };
+}
+
 async function buildSessionRound(input: {
   session: PartySession;
   track: SessionTrackRef;
@@ -318,12 +384,26 @@ async function buildSessionRound(input: {
   seed: number;
   startedAt: number;
 }): Promise<SessionRound> {
-  const lyrics = await getTrackLyrics(input.track.trackId);
-  const labels = labelsFor(input.miniGame);
   const roundIndex = (input.session.currentRound?.index ?? 0) + 1;
   // Per-match difficulty curve: ramps from the host's floor toward the finale.
   const tier = tierForRound(roundIndex, input.session.rounds, input.session.difficultyFloor);
   const diff = resolveDifficulty(tier);
+
+  // Audio games carry no lyrics — build them before any Musixmatch fetch.
+  if (input.miniGame === "genre_roulette" || input.miniGame === "beat_lock") {
+    return buildAudioRound({
+      miniGame: input.miniGame,
+      track: input.track,
+      roundIndex,
+      tier,
+      diff,
+      seed: input.seed,
+      startedAt: input.startedAt,
+    });
+  }
+
+  const lyrics = await getTrackLyrics(input.track.trackId);
+  const labels = labelsFor(input.miniGame);
   const excludeKeys = new Set(input.session.usedPromptKeys);
   const base = {
     index: roundIndex,
@@ -579,10 +659,15 @@ export async function submitAnswer(sessionCode: string, input: SubmitAnswerInput
   const submittedAt = now();
   const limitMs = round.timeLimitMs || ROUND_TIME_LIMIT_MS;
   const elapsedMs = Math.min(Math.max(0, submittedAt - round.startedAt), limitMs);
+  // Beat Lock submits a 0..100 timing-accuracy score (computed on the phone)
+  // instead of a text/choice answer.
+  const isTap = round.answerType === "tap";
+  const tapAccuracy = isTap ? Math.max(0, Math.min(100, Number.parseFloat(guess) || 0)) : 0;
   const solution = round.solution ?? "";
-  const correct = normalizeAnswer(guess) === normalizeAnswer(solution);
-  const points =
-    (round.miniGame === "on_beat" || round.miniGame === "the_drop") && round.drop
+  const correct = isTap ? tapAccuracy >= 50 : normalizeAnswer(guess) === normalizeAnswer(solution);
+  const points = isTap
+    ? Math.round(tapAccuracy * 10)
+    : (round.miniGame === "on_beat" || round.miniGame === "the_drop") && round.drop
       ? scoreRound({
           isCorrect: correct,
           elapsedMs,

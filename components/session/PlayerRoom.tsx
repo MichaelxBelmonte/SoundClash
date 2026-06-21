@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import Button from "@/components/brand/Button";
 import JCard from "@/components/brand/JCard";
@@ -180,6 +180,12 @@ export default function PlayerRoom({ code }: { code: string }) {
                   {session.currentRound.status === "revealed" ? answer.points : "Ready"}
                 </p>
               </div>
+            ) : session.currentRound.answerType === "tap" ? (
+              <BeatTapPad
+                round={session.currentRound}
+                submitting={submitting}
+                onLock={(score) => void submitGuess(String(score))}
+              />
             ) : session.currentRound.answerType === "choice" ? (
               <div className="mt-6 grid gap-2">
                 {session.currentRound.options?.map((option, index) => (
@@ -251,6 +257,80 @@ export default function PlayerRoom({ code }: { code: string }) {
         ) : null}
       </section>
     </main>
+  );
+}
+
+// Beat Lock: tap to an on-screen metronome. The pulse runs on a LOCAL clock at
+// the round's BPM, so accuracy is self-consistent (phone tap vs phone pulse) and
+// independent of the TV audio or the 1s poll. Submits a 0..100 timing score.
+function BeatTapPad({
+  round,
+  submitting,
+  onLock,
+}: {
+  round: NonNullable<PublicSessionState["currentRound"]>;
+  submitting: boolean;
+  onLock: (score: number) => void;
+}) {
+  const bpm = round.bpm ?? 110;
+  const windowMs = round.tapWindowMs ?? 160;
+  const period = 60000 / bpm;
+  const startRef = useRef<number | null>(null);
+  const tapsRef = useRef<number[]>([]);
+  const [count, setCount] = useState(0);
+  const [pulse, setPulse] = useState(false);
+
+  useEffect(() => {
+    startRef.current = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const t0 = startRef.current ?? performance.now();
+      const phase = ((performance.now() - t0) % period) / period;
+      setPulse(phase < 0.18);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [period]);
+
+  function tap() {
+    if (submitting) return;
+    const t0 = startRef.current ?? performance.now();
+    tapsRef.current.push(performance.now() - t0);
+    setCount(tapsRef.current.length);
+  }
+
+  function lock() {
+    const taps = tapsRef.current;
+    if (taps.length < 3 || submitting) return;
+    const errs = taps.map((t) => {
+      const m = ((t % period) + period) % period;
+      return Math.min(m, period - m);
+    });
+    const meanErr = errs.reduce((a, b) => a + b, 0) / errs.length;
+    const score = Math.round(Math.max(0, Math.min(1, 1 - meanErr / windowMs)) * 100);
+    onLock(score);
+  }
+
+  return (
+    <div className="mt-6 space-y-4">
+      <button
+        type="button"
+        onClick={tap}
+        disabled={submitting}
+        className={[
+          "flex aspect-square w-full items-center justify-center rounded-3xl border-4 transition-colors",
+          pulse ? "border-[#C2563B] bg-[#C2563B]/15" : "border-black/15 bg-white",
+        ].join(" ")}
+      >
+        <span className="font-condensed text-3xl uppercase tracking-tight text-[#15120E]">
+          {count < 3 ? "Tap the beat" : `${count} taps`}
+        </span>
+      </button>
+      <Button type="button" variant="magenta" full disabled={count < 3 || submitting} onClick={lock}>
+        {submitting ? "Locking…" : count < 3 ? "Tap at least 3 times" : "Lock my timing"}
+      </Button>
+    </div>
   );
 }
 

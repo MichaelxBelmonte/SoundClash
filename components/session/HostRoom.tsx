@@ -957,8 +957,12 @@ function HostRound({
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-brand">
             {active?.title ?? "Guided round"}
           </p>
-          <h2 className="mt-2 text-2xl font-bold text-ink">{active?.trackName}</h2>
-          <p className="text-sm text-black/45">{active?.artistName}</p>
+          {active?.audioUrl ? null : (
+            <>
+              <h2 className="mt-2 text-2xl font-bold text-ink">{active?.trackName}</h2>
+              <p className="text-sm text-black/45">{active?.artistName}</p>
+            </>
+          )}
           <p className="mt-2 text-sm text-black/55">{active?.instruction}</p>
         </div>
         <div className="grid gap-2 rounded-md border border-black/10 bg-black/[0.04] px-3 py-2 md:min-w-44">
@@ -979,9 +983,15 @@ function HostRound({
         </div>
       </div>
 
-      <p className="mt-10 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
-        {active ? <HostPrompt round={active} /> : prompt}
-      </p>
+      {active?.audioUrl ? <AudioRoundStage round={active} /> : null}
+
+      {active && active.prompt ? (
+        <p className="mt-10 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
+          <HostPrompt round={active} />
+        </p>
+      ) : !active ? (
+        <p className="mt-10 text-4xl font-semibold leading-tight text-ink sm:text-6xl">{prompt}</p>
+      ) : null}
 
       {active?.answerType === "choice" && active.options?.length ? (
         <div className={active.miniGame === "mondegreen" ? "mt-6 grid gap-2" : "mt-6 grid gap-2 sm:grid-cols-2"}>
@@ -1064,6 +1074,47 @@ function HostRound({
         >
           Back to lobby
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Plays the generated instrumental bed for an audio round on the shared TV.
+function AudioRoundStage({ round }: { round: NonNullable<PublicSessionState["currentRound"]> }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playing = round.status === "answering";
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !round.audioUrl) return;
+    if (el.getAttribute("data-src") !== round.audioUrl) {
+      el.src = round.audioUrl;
+      el.setAttribute("data-src", round.audioUrl);
+      el.load();
+    }
+    el.volume = 0.7;
+    if (playing) {
+      void el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+    return () => el.pause();
+  }, [round.audioUrl, playing]);
+  return (
+    <div className="mt-8 flex items-center gap-4 rounded-md border border-black/10 bg-black/[0.04] px-5 py-4">
+      <audio ref={audioRef} loop preload="auto" />
+      <span
+        aria-hidden
+        className={[
+          "inline-block h-6 w-6 shrink-0 rounded-full",
+          round.bpm ? "bg-brand" : "border-2 border-brand border-t-transparent",
+          playing ? (round.bpm ? "animate-pulse" : "animate-spin") : "",
+        ].join(" ")}
+      />
+      <div>
+        <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-black/45">Now playing</p>
+        <p className="text-lg font-semibold text-ink">
+          {round.bpm ? `Tap on the beat · ${round.bpm} BPM` : "Name the vibe"}
+        </p>
       </div>
     </div>
   );

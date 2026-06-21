@@ -44,6 +44,9 @@ export const MINI_GAME_CATALOG: MiniGameMeta[] = [
   { id: "finish_line", name: "Finish the Line", blurb: "Tap the missing last word.", example: "“…and I will always love ___”", category: "lyrics", image: "/games/finish_line.png" },
   { id: "mondegreen", name: "Misheard", blurb: "Spot the real lyric among the mondegreens.", example: "“Hold me closer, Tony Danza” — real or misheard?", category: "lyrics", image: "/games/mondegreen.png" },
   { id: "next_line", name: "Next Line", blurb: "Pick the line that comes next.", example: "pick the line that comes next", category: "lyrics", image: "/games/next_line.png" },
+  // Generated-audio games (need ELEVENLABS_API_KEY; reuse cut games' art).
+  { id: "genre_roulette", name: "Genre Roulette", blurb: "Name the vibe of the beat.", example: "what genre is this beat?", category: "trivia", image: "/games/the_drop.png" },
+  { id: "beat_lock", name: "Beat Lock", blurb: "Tap on the beat — timing scores.", example: "tap on every beat", category: "timing", image: "/games/on_beat.png" },
 ];
 
 // Façade-only entries shown in the host gallery as "Coming soon". They are NOT

@@ -9,6 +9,23 @@ import type { MiniGameId } from "@/lib/session/types";
 const FAINT = "rgba(255,255,255,0.16)";
 
 const ART: Record<MiniGameId, ReactNode> = {
+  // Genre Roulette — a spinning disc + needle: name the vibe of the bed.
+  genre_roulette: (
+    <>
+      <circle cx="56" cy="36" r="20" fill="none" stroke={FAINT} strokeWidth="3" />
+      <circle cx="56" cy="36" r="4" fill="currentColor" />
+      <path d="M70 22 84 14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    </>
+  ),
+  // Beat Lock — evenly spaced beat ticks with one locked accent.
+  beat_lock: (
+    <>
+      <rect x="20" y="40" width="6" height="16" rx="3" fill={FAINT} />
+      <rect x="40" y="32" width="6" height="24" rx="3" fill={FAINT} />
+      <rect x="60" y="24" width="6" height="32" rx="3" fill="currentColor" />
+      <rect x="80" y="36" width="6" height="20" rx="3" fill={FAINT} />
+    </>
+  ),
   // Finish the Line — lyric bars with the last word as a blank.
   finish_line: (
     <>

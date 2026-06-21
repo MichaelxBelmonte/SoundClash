@@ -12,9 +12,12 @@ export type MiniGameId =
   | "name_song"
   | "mondegreen"
   | "song_mash"
-  | "on_beat";
+  | "on_beat"
+  // Generated-audio games (no lyrics, no licensing — ElevenLabs Music beds).
+  | "genre_roulette"
+  | "beat_lock";
 export type HostVoicePreset = "hype" | "judge" | "diva" | "custom";
-export type RoundAnswerType = "text" | "choice";
+export type RoundAnswerType = "text" | "choice" | "tap";
 
 export interface SessionTrackRef {
   trackId: number;
@@ -66,6 +69,11 @@ export interface SessionRound {
   answerType: RoundAnswerType;
   options?: string[];
   drop?: FinishLineDrop;
+  // Audio games: URL of the generated instrumental bed the TV plays.
+  audioUrl?: string;
+  // Beat Lock: target tempo + the on-beat tap tolerance (ms), both tier-scaled.
+  bpm?: number;
+  tapWindowMs?: number;
   solution?: string;
   copyright?: string;
   tracking?: TrackingLinks;
