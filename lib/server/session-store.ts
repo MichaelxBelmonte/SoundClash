@@ -849,6 +849,7 @@ export async function startRound(sessionCode: string, input: StartRoundInput): P
     voiceTracks: session.voiceTracks.length,
     voiceCloned: Boolean(session.voiceClone),
     studioTracksReady: session.studioTracks.filter((t) => t.state === "ready" && t.audioUrl).length,
+    studioTracksPending: session.studioTracks.filter((t) => t.state !== "ready" && t.state !== "failed").length,
     audioGen: isMusicGenerationAvailable(),
     stemSeparation: Boolean(process.env.LALAL_API_KEY),
   });

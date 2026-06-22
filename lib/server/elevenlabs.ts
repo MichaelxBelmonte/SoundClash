@@ -175,13 +175,21 @@ export async function composeMusic(input: MusicInput): Promise<Response> {
 
 // ---- Speech-to-Text (Scribe) -----------------------------------------------
 // Transcribe a short uploaded recording. Used by Studio Session to turn what a
-// player says on their phone into text that becomes the song's lyrics.
-export async function transcribeVoice(audio: Blob, languageCode?: string): Promise<string> {
+// player says on their phone into text that becomes the song's lyrics. Returns
+// the text PLUS the detected language, so the song can be made in the language
+// the player actually spoke (not the room's narrator language).
+export interface Transcript {
+  text: string;
+  /** ISO code Scribe detected (or was told). Drives the sung-lyric language. */
+  languageCode?: string;
+}
+
+export async function transcribeVoice(audio: Blob, languageCode?: string): Promise<Transcript> {
   const form = new FormData();
   form.append("file", audio, "recording.webm");
   form.append("model_id", "scribe_v2");
-  // language_code is optional; passing the session's narrator language helps
-  // short/noisy clips. Scribe also auto-detects when omitted.
+  // Omit language_code by default → Scribe auto-detects, so a player speaking
+  // Italian in an English-narrated room is still transcribed as Italian.
   if (languageCode) form.append("language_code", languageCode);
   // No explicit Content-Type — fetch sets the multipart boundary for FormData.
   const response = await fetch(`${BASE}/speech-to-text`, {
@@ -191,8 +199,8 @@ export async function transcribeVoice(audio: Blob, languageCode?: string): Promi
     cache: "no-store",
   });
   if (!response.ok) throw new ElevenLabsProviderError(`ElevenLabs STT HTTP ${response.status}`);
-  const data = (await response.json()) as { text?: string };
-  return (data.text ?? "").trim();
+  const data = (await response.json()) as { text?: string; language_code?: string };
+  return { text: (data.text ?? "").trim(), languageCode: data.language_code };
 }
 
 // ---- Music with custom lyrics (composition plan) ---------------------------

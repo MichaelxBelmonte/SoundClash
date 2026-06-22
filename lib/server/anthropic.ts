@@ -239,13 +239,14 @@ function fallbackPolish(input: PolishInput, allowTranscript = true): string {
 export async function polishBars(input: PolishInput): Promise<string> {
   const key = apiKey();
   if (!key) return fallbackPolish(input);
-  const lang = input.nativeName?.trim() || "English";
+  const lang = input.nativeName?.trim() || "their language";
   const transcript = input.transcript.trim();
   const prompt = [
-    `A party-game player recorded a short spoken clip. Turn it into 2 to 4 catchy rap/sung bars in ${lang} that an AI will SING over a ${input.vibe || "hip-hop"} beat.`,
+    `A party-game player recorded a short spoken clip. Turn it into 2 to 4 catchy rap/sung bars an AI will SING over a ${input.vibe || "hip-hop"} beat.`,
     `What they said: "${transcript || "(unclear / empty)"}"`,
+    "Write the bars in the SAME LANGUAGE they spoke — match the language of that text exactly (e.g. Italian stays Italian). Do NOT translate to English.",
     "Keep their meaning and key words where you can; make it rhyme and flow.",
-    `Make it playful, hype, and CLEAN (no slurs/profanity/hate/sexual content). If the input is empty, unclear, or inappropriate, instead write a fun clean hype bar about ${input.playerName}.`,
+    `Make it playful, hype, and CLEAN (no slurs/profanity/hate/sexual content). If the input is empty, unclear, or inappropriate, instead write a fun clean hype bar about ${input.playerName} in ${lang}.`,
     "Return ONLY the bars as plain text separated by newlines — max 4 lines, each under 200 characters. No title, no quotes, no commentary.",
   ].join("\n");
 

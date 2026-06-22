@@ -65,7 +65,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       playerName,
       audio: file,
       vibe,
-      languageCode: session.narratorLang,
+      // No languageCode → Scribe auto-detects the spoken language; the room's
+      // language is only a fallback for the song-language style hint.
       nativeName: languageName(session.narratorLang),
       onState: (state) => updateStudioTrack(code, trackId, { state }),
     })

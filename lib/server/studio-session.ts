@@ -6,6 +6,7 @@ import {
   transcribeVoice,
   type CompositionPlan,
 } from "@/lib/server/elevenlabs";
+import { languageName } from "@/lib/game/languages";
 import type { StudioTrackState } from "@/lib/session/types";
 
 // Studio Session track baking: a player records ~8-10s of speech on their phone,
@@ -48,8 +49,9 @@ const SECTION_MS = 14_000;
 export const STUDIO_VIBE_IDS = Object.keys(STUDIO_VIBES);
 
 // Build a single-section composition plan from the polished lyric, clamped to the
-// API limits (max 30 lines, max 200 chars/line).
-function planFor(lyric: string, vibe: string): CompositionPlan {
+// API limits (max 30 lines, max 200 chars/line). `langName` (e.g. "Italian")
+// nudges the model to sing in the player's language, not default English.
+function planFor(lyric: string, vibe: string, langName?: string): CompositionPlan {
   const styles = STUDIO_VIBES[vibe] ?? STUDIO_VIBES[DEFAULT_VIBE];
   const lines = lyric
     .split("\n")
@@ -58,7 +60,7 @@ function planFor(lyric: string, vibe: string): CompositionPlan {
     .slice(0, 30)
     .map((line) => line.slice(0, 200));
   return {
-    positive_global_styles: styles.global,
+    positive_global_styles: langName ? [`vocals sung in ${langName}`, ...styles.global] : styles.global,
     negative_global_styles: NEGATIVE_GLOBAL,
     sections: [
       {
@@ -99,7 +101,9 @@ export async function generateStudioTrack(input: StudioTrackInput): Promise<Stud
   const vibe = input.vibe && STUDIO_VIBES[input.vibe] ? input.vibe : DEFAULT_VIBE;
 
   input.onState?.("transcribing");
-  const transcript = await transcribeVoice(input.audio, input.languageCode);
+  // Auto-detect the spoken language (don't force the room's language) so the song
+  // comes out in the language the player actually used.
+  const { text: transcript, languageCode: detected } = await transcribeVoice(input.audio, input.languageCode);
 
   input.onState?.("writing");
   const lyric = await polishBars({
@@ -110,7 +114,8 @@ export async function generateStudioTrack(input: StudioTrackInput): Promise<Stud
   });
 
   input.onState?.("composing");
-  const res = await composeMusicWithLyrics(planFor(lyric, vibe));
+  const songLangName = detected ? languageName(detected) : input.nativeName;
+  const res = await composeMusicWithLyrics(planFor(lyric, vibe, songLangName));
   const mp3 = new Uint8Array(await res.arrayBuffer());
   audioCache.set(cacheKey(input.code, input.trackId), mp3);
 

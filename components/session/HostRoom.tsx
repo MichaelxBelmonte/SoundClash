@@ -542,6 +542,7 @@ export default function HostRoom({ code }: { code: string }) {
   const preparedStems = session ? Object.keys(session.trackStems).length : 0;
   const voiceTrackCount = session?.voiceTracks?.length ?? 0;
   const studioReadyCount = session?.studioTracks?.filter((t) => t.state === "ready" && t.audioUrl).length ?? 0;
+  const studioPendingCount = session?.studioTracks?.filter((t) => t.state !== "ready" && t.state !== "failed").length ?? 0;
   const blockers = session
     ? gameBlockers(selectedGames, {
         deckCount: deck.length,
@@ -549,6 +550,7 @@ export default function HostRoom({ code }: { code: string }) {
         voiceTracks: voiceTrackCount,
         voiceCloned: Boolean(session.voiceClone),
         studioTracksReady: studioReadyCount,
+        studioTracksPending: studioPendingCount,
         // Capabilities default to true if an older session payload lacks the field.
         audioGen: session.capabilities?.audioGen ?? true,
         stemSeparation: session.capabilities?.stemSeparation ?? true,
@@ -1023,6 +1025,9 @@ export default function HostRoom({ code }: { code: string }) {
                       {session?.miniGames.length ?? 0} mini-game{(session?.miniGames.length ?? 0) === 1 ? "" : "s"} ·{" "}
                       {lyricsNeeded ? `${deck.length} track${deck.length === 1 ? "" : "s"}` : "generated audio"}
                       {selectedGames.includes("stem_heist") ? ` · ${preparedStems}/4 stems` : ""}
+                      {selectedGames.includes("studio_session")
+                        ? ` · studio: ${studioReadyCount} ready${studioPendingCount ? `, ${studioPendingCount} cooking…` : ""}`
+                        : ""}
                     </p>
                   </div>
                   <div className="flex w-full flex-col gap-2 sm:w-64">

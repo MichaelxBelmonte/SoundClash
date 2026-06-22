@@ -148,6 +148,8 @@ export interface ReadinessContext {
   voiceCloned: boolean;
   /** Player recordings already generated into ready Studio Session tracks. */
   studioTracksReady: number;
+  /** Player recordings still being transcribed/written/composed (cooking). */
+  studioTracksPending: number;
   /** ELEVENLABS_API_KEY present server-side (generated audio possible). */
   audioGen: boolean;
   /** LALAL_API_KEY present server-side (stem separation possible). */
@@ -191,7 +193,15 @@ export function gameBlockers(games: readonly MiniGameId[], ctx: ReadinessContext
       if (!ctx.audioGen) {
         blockers.push({ game, source, reason: "Audio generation off — set ELEVENLABS_API_KEY" });
       } else if (ctx.studioTracksReady < STUDIO_SESSION_MIN) {
-        blockers.push({ game, source, reason: "Players need to record in the Studio booth" });
+        // Distinguish "nobody recorded yet" from "tracks are still generating" so
+        // the host doesn't think the upload failed.
+        blockers.push({
+          game,
+          source,
+          reason: ctx.studioTracksPending > 0
+            ? "Studio tracks are still generating…"
+            : "Players need to record in the Studio booth",
+        });
       }
     }
   }

@@ -208,15 +208,28 @@ export default function StudioRecordPad({
 
       {/* A track is cooking or done → show status + offer a re-record. */}
       {track ? (
-        <div className="mt-3 rounded-xl border border-black/12 bg-white px-4 py-3">
-          <p className="font-condensed text-sm uppercase tracking-[0.03em] text-ink">{STATE_COPY[track.state]}</p>
+        <div
+          className={[
+            "mt-3 rounded-xl border px-4 py-3",
+            cooking ? "border-[#C2563B]/30 bg-[#C2563B]/[0.06]" : "border-black/12 bg-white",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2">
+            {cooking ? (
+              <span aria-hidden className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#C2563B] border-t-transparent" />
+            ) : null}
+            <p className="font-condensed text-sm uppercase tracking-[0.03em] text-ink">{STATE_COPY[track.state]}</p>
+          </div>
+          {cooking ? (
+            <>
+              <p className="mt-1 text-xs text-black/55">Building your track — this takes about 10–15s. Don't close this.</p>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-[#C2563B]" />
+              </div>
+            </>
+          ) : null}
           {track.lyric && track.state === "ready" ? (
             <p className="mt-1 line-clamp-2 text-xs text-black/55">“{track.lyric}”</p>
-          ) : null}
-          {cooking ? (
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10">
-              <div className="h-full w-1/3 animate-pulse rounded-full bg-[#C2563B]" />
-            </div>
           ) : null}
         </div>
       ) : null}
