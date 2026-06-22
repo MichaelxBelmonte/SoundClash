@@ -20,7 +20,10 @@ export type MiniGameId =
   | "stem_heist"
   // Host clones their voice → app bakes a track (voice over a generated beat) →
   // the crowd rates it. Uses the "judge" answer type. ElevenLabs IVC + Music + TTS.
-  | "voice_clash";
+  | "voice_clash"
+  // Each player records a line on their phone → STT → AI sings it over a beat →
+  // the crowd rates every track (judge carousel). ElevenLabs STT + Music v1.
+  | "studio_session";
 export type HostVoicePreset = "hype" | "judge" | "diva" | "custom";
 // "judge" = subjective crowd rating (0..100 / stars). No correct answer; the
 // track's score is the aggregate of player ratings (see Voice Clash).
@@ -149,6 +152,16 @@ export interface SessionRound {
   lyric?: string;
   creatorPlayerId?: string;
   studioScore?: number;
+  // Studio Session: the pool of player tracks played in sequence on the TV and
+  // rated individually by the crowd. Per-track studioScore is filled at reveal.
+  studioTracksRef?: {
+    id: number;
+    playerId: string;
+    playerName: string;
+    audioUrl: string;
+    lyric: string;
+    studioScore?: number;
+  }[];
   solution?: string;
   copyright?: string;
   tracking?: TrackingLinks;

@@ -63,6 +63,12 @@ type SetupStep = (typeof SETUP_STEPS)[number]["id"];
 // A balanced one-tap starter: one game per category (all from the live catalog).
 const QUICK_SET: MiniGameId[] = ["finish_line", "genre_roulette", "beat_lock"];
 
+// Games whose ANSWER is the source track / artist — showing the track header while
+// players are still answering would hand them the solution. We hide the source on
+// these until the reveal. (stem_heist is audio-only, so its header is already
+// hidden via audioUrl; word_rush deliberately names the track in its own prompt.)
+const ANSWER_IS_SOURCE = new Set<MiniGameId>(["name_song", "song_mash", "artist_pick"]);
+
 // Stand-in "track" for generated-only shows (Genre Roulette / Beat Lock make their
 // own audio, so there is no Musixmatch deck). The seed still varies per round.
 const GENERATED_PLACEHOLDER: TrackSummary = {
@@ -525,12 +531,14 @@ export default function HostRoom({ code }: { code: string }) {
   const voiceNeeded = needsHostVoice(selectedGames);
   const preparedStems = session ? Object.keys(session.trackStems).length : 0;
   const voiceTrackCount = session?.voiceTracks?.length ?? 0;
+  const studioReadyCount = session?.studioTracks?.filter((t) => t.state === "ready" && t.audioUrl).length ?? 0;
   const blockers = session
     ? gameBlockers(selectedGames, {
         deckCount: deck.length,
         preparedStems,
         voiceTracks: voiceTrackCount,
         voiceCloned: Boolean(session.voiceClone),
+        studioTracksReady: studioReadyCount,
         // Capabilities default to true if an older session payload lacks the field.
         audioGen: session.capabilities?.audioGen ?? true,
         stemSeparation: session.capabilities?.stemSeparation ?? true,
@@ -1085,6 +1093,10 @@ function HostRound({
   const critical = Boolean(answering && remainingMs <= 3000);
   const answered = active?.answers.length ?? 0;
   const totalPlayers = session.players.length;
+  // Hide the source track/artist while showing it would spoil the answer (the song
+  // or the artist IS the answer). It's fine to show once the round is revealed.
+  const answerIsSource = active ? ANSWER_IS_SOURCE.has(active.miniGame) : false;
+  const showSource = Boolean(active && !active.audioUrl && !(answerIsSource && active.status === "answering"));
 
   return (
     <div>
@@ -1093,13 +1105,21 @@ function HostRound({
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-brand">
             {active?.title ?? "Guided round"}
           </p>
-          {active?.audioUrl ? null : (
-            <>
-              <h2 className="mt-2 text-2xl font-bold text-ink">{active?.trackName}</h2>
-              <p className="text-sm text-black/45">{active?.artistName}</p>
-            </>
-          )}
-          <p className="mt-2 text-sm text-black/55">{active?.instruction}</p>
+          {/* The directive — what to actually do this round, stated clearly. */}
+          <p className="mt-2 font-condensed text-xl uppercase leading-tight tracking-[0.02em] text-ink sm:text-2xl">
+            {active?.instruction}
+          </p>
+          {/* Source track as a quiet chip (NOT a bold heading that competes with the
+              question) — and only when it doesn't give the answer away. */}
+          {showSource ? (
+            <p className="mt-2.5 inline-flex max-w-full items-center gap-1.5 rounded-full border border-black/10 bg-black/[0.03] px-2.5 py-1 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-black/45">
+              <span className="text-black/35">{t.sourceLabel}</span>
+              <span className="truncate text-black/55">
+                {active?.trackName}
+                {active?.artistName ? ` · ${active.artistName}` : ""}
+              </span>
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-2 rounded-md border border-black/10 bg-black/[0.04] px-3 py-2 md:min-w-48">
           <div className="flex items-center justify-between gap-4">
@@ -1145,9 +1165,14 @@ function HostRound({
       ) : null}
 
       {active && active.prompt ? (
-        <p className="mt-10 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
-          <HostPrompt round={active} />
-        </p>
+        // The question, clearly framed and labelled — so it's unmistakably the thing
+        // to answer (not the game title or the source track above it).
+        <div className="mt-8 rounded-2xl border border-black/10 bg-black/[0.02] px-5 py-6 sm:px-7 sm:py-8">
+          <p className="font-mono text-[0.6rem] uppercase tracking-[0.24em] text-brand">{t.questionLabel}</p>
+          <p className="mt-3 text-4xl font-semibold leading-tight text-ink sm:text-6xl">
+            <HostPrompt round={active} />
+          </p>
+        </div>
       ) : !active ? (
         <p className="mt-10 text-4xl font-semibold leading-tight text-ink sm:text-6xl">{prompt}</p>
       ) : null}

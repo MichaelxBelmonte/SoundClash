@@ -43,6 +43,19 @@ const ART: Record<MiniGameId, ReactNode> = {
       <path d="M30 30q-6 6 0 12M90 30q6 6 0 12" fill="none" stroke={FAINT} strokeWidth="3" strokeLinecap="round" />
     </>
   ),
+  // Studio Session — a mic capturing speech that turns into sung notes.
+  studio_session: (
+    <>
+      <rect x="20" y="20" width="14" height="22" rx="7" fill="none" stroke="currentColor" strokeWidth="2.5" />
+      <path d="M15 38a12 12 0 0 0 24 0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M27 50v6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M46 36h6M56 36h6M66 36h6" stroke={FAINT} strokeWidth="3" strokeLinecap="round" />
+      <path d="M84 16v28" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M84 16l12-3v10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="80" cy="46" r="5" fill="none" stroke="currentColor" strokeWidth="2.5" />
+      <circle cx="92" cy="44" r="5" fill="none" stroke="currentColor" strokeWidth="2.5" />
+    </>
+  ),
   // Finish the Line — lyric bars with the last word as a blank.
   finish_line: (
     <>

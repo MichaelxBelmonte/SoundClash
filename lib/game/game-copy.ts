@@ -24,6 +24,7 @@ const EN: Record<MiniGameId, GameCopy> = {
   beat_lock: { title: "Beat Lock", instruction: "Tap on the beat on your phone." },
   stem_heist: { title: "Stem Heist", instruction: "Name the track from this isolated stem." },
   voice_clash: { title: "Voice Clash", instruction: "Listen — then rate the track." },
+  studio_session: { title: "Studio Session", instruction: "Listen to each track — then rate them." },
 };
 
 // Brand names (Genre Roulette, Beat Lock, Stem Heist, Voice Clash) stay as-is.
@@ -35,6 +36,7 @@ const IT: Partial<Record<MiniGameId, GameCopy>> = {
   beat_lock: { title: "Beat Lock", instruction: "Tocca a tempo sul telefono." },
   stem_heist: { title: "Stem Heist", instruction: "Indovina il brano da questo stem isolato." },
   voice_clash: { title: "Voice Clash", instruction: "Ascolta — poi vota la traccia." },
+  studio_session: { title: "Studio Session", instruction: "Ascolta ogni traccia — poi votale." },
 };
 
 const BY_LANG: Record<string, Partial<Record<MiniGameId, GameCopy>>> = { it: IT };

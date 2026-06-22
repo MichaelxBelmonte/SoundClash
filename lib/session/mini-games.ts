@@ -53,6 +53,10 @@ export const MINI_GAME_CATALOG: MiniGameMeta[] = [
   // Voice Clash (needs ELEVENLABS_API_KEY; host clones their voice in the Voice
   // Studio, the app bakes a track, the crowd rates it; reuses artist_pick.png).
   { id: "voice_clash", name: "Voice Clash", blurb: "The host's cloned voice drops a track — rate it.", example: "rate the host's AI track", category: "trivia", image: "/games/artist_pick.png" },
+  // Studio Session (needs ELEVENLABS_API_KEY; each player records a line in the
+  // lobby Studio booth → STT → the AI sings it over a beat → the crowd rates every
+  // track). No image yet → falls back to the built-in SVG line-art.
+  { id: "studio_session", name: "Studio Session", blurb: "Record a line — the AI sings it, the crowd rates it.", example: "tap mic ~10s → hear your AI track", category: "trivia" },
 ];
 
 // Façade-only entries shown in the host gallery as "Coming soon". They are NOT
@@ -84,7 +88,7 @@ export function orderMiniGames(ids: readonly MiniGameId[]): MiniGameId[] {
 // the audio is generated from scratch ("generated"), or must prepare host-supplied
 // audio in the lobby ("host-audio"). Drives the conditional Music step and the
 // no-silent-fallback start gate. Exhaustive over MiniGameId on purpose.
-export type GameContentSource = "lyrics" | "generated" | "host-audio" | "host-voice";
+export type GameContentSource = "lyrics" | "generated" | "host-audio" | "host-voice" | "player-voice";
 
 export const GAME_CONTENT_SOURCE: Record<MiniGameId, GameContentSource> = {
   finish_line: "lyrics",
@@ -100,12 +104,15 @@ export const GAME_CONTENT_SOURCE: Record<MiniGameId, GameContentSource> = {
   beat_lock: "generated",
   stem_heist: "host-audio",
   voice_clash: "host-voice",
+  studio_session: "player-voice",
 };
 
 // Minimum host-prepared stems before Stem Heist can run (need real decoys).
 export const STEM_HEIST_MIN = 4;
 // Minimum baked tracks before Voice Clash can run.
 export const VOICE_CLASH_MIN = 1;
+// Minimum ready player tracks before Studio Session can run.
+export const STUDIO_SESSION_MIN = 1;
 
 export function contentSourceFor(game: MiniGameId): GameContentSource {
   return GAME_CONTENT_SOURCE[game];
@@ -118,6 +125,9 @@ export function needsHostAudio(games: readonly MiniGameId[]): boolean {
 }
 export function needsHostVoice(games: readonly MiniGameId[]): boolean {
   return games.some((id) => GAME_CONTENT_SOURCE[id] === "host-voice");
+}
+export function needsPlayerVoice(games: readonly MiniGameId[]): boolean {
+  return games.some((id) => GAME_CONTENT_SOURCE[id] === "player-voice");
 }
 // True when the rotation can start with NO Musixmatch deck and NO host upload —
 // i.e. every selected game generates its own audio. Lets us skip the Music step.
@@ -135,6 +145,8 @@ export interface ReadinessContext {
   voiceTracks: number;
   /** Whether the host's voice clone exists yet. */
   voiceCloned: boolean;
+  /** Player recordings already generated into ready Studio Session tracks. */
+  studioTracksReady: number;
   /** ELEVENLABS_API_KEY present server-side (generated audio possible). */
   audioGen: boolean;
   /** LALAL_API_KEY present server-side (stem separation possible). */
@@ -173,6 +185,12 @@ export function gameBlockers(games: readonly MiniGameId[], ctx: ReadinessContext
         blockers.push({ game, source, reason: "Clone your voice in the Voice Studio" });
       } else if (ctx.voiceTracks < VOICE_CLASH_MIN) {
         blockers.push({ game, source, reason: "Bake a track in the Voice Studio" });
+      }
+    } else if (source === "player-voice") {
+      if (!ctx.audioGen) {
+        blockers.push({ game, source, reason: "Audio generation off — set ELEVENLABS_API_KEY" });
+      } else if (ctx.studioTracksReady < STUDIO_SESSION_MIN) {
+        blockers.push({ game, source, reason: "Players need to record in the Studio booth" });
       }
     }
   }

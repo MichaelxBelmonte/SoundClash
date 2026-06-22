@@ -262,6 +262,9 @@ function gameReady(session: PartySession, game: MiniGameId, hasRichsync: boolean
   if (game === "voice_clash") {
     return isMusicGenerationAvailable() && Boolean(session.voiceClone) && session.voiceTracks.length >= 1;
   }
+  if (game === "studio_session") {
+    return isMusicGenerationAvailable() && session.studioTracks.some((t) => t.state === "ready" && t.audioUrl);
+  }
   return isPlayable(game, hasRichsync);
 }
 
@@ -474,6 +477,58 @@ function buildVoiceClashRound(input: {
   };
 }
 
+// Studio Session (judge carousel): play every ready player track in sequence on
+// the TV and let the crowd rate each one. No correct answer — per-track scoring
+// happens at reveal. Needs >=1 ready track (gated upstream in gameReady).
+function buildStudioSessionRound(input: {
+  session: PartySession;
+  track: SessionTrackRef;
+  roundIndex: number;
+  tier: DifficultyTier;
+  diff: RoundDifficultyConfig;
+  seed: number;
+  startedAt: number;
+}): SessionRound {
+  const ready = input.session.studioTracks
+    .filter((t) => t.state === "ready" && t.audioUrl)
+    .sort((a, b) => a.id - b.id);
+  if (!ready.length) throw new Error("studio_session_not_ready");
+  // Listening party: enough time to play + rate each track (~16s apiece).
+  const timeLimitMs = Math.max(input.diff.timeLimitMs, ready.length * 16_000);
+  const refs = ready.map((t) => ({
+    id: t.id,
+    playerId: t.playerId,
+    playerName: t.playerName,
+    audioUrl: t.audioUrl as string,
+    lyric: t.lyric ?? "",
+  }));
+  return {
+    index: input.roundIndex,
+    miniGame: "studio_session",
+    title: "Studio Session",
+    instruction: "Listen to each track — then rate them.",
+    trackId: input.track.trackId,
+    trackName: "Studio Session",
+    artistName: "The crowd",
+    hasRichsync: false,
+    seed: input.seed,
+    difficulty: input.tier,
+    timeLimitMs,
+    prompt: "",
+    answerType: "judge",
+    // First track seeds the TV opener; the carousel walks the full ref list.
+    audioUrl: refs[0].audioUrl,
+    lyric: refs[0].lyric,
+    creatorPlayerId: refs[0].playerId,
+    studioTracksRef: refs,
+    solution: "",
+    startedAt: input.startedAt,
+    endsAt: input.startedAt + timeLimitMs,
+    status: "answering",
+    answers: [],
+  };
+}
+
 // Replace the locally-generated decoys with Claude-written, context-plausible
 // distractors when available (falls back to the local options on any failure or
 // timeout). This is what makes the lyrics games actually hard — the wrong answers
@@ -547,6 +602,20 @@ async function buildSessionRound(input: {
       startedAt: input.startedAt,
     });
     return { ...voiceRound, title: copy.title, instruction: copy.instruction };
+  }
+
+  // Studio Session plays the crowd's recorded-then-sung tracks — lyric-free here.
+  if (input.miniGame === "studio_session") {
+    const studioRound = buildStudioSessionRound({
+      session: input.session,
+      track: input.track,
+      roundIndex,
+      tier,
+      diff,
+      seed: input.seed,
+      startedAt: input.startedAt,
+    });
+    return { ...studioRound, title: copy.title, instruction: copy.instruction };
   }
 
   const lyrics = await getTrackLyrics(input.track.trackId);
@@ -775,6 +844,7 @@ export async function startRound(sessionCode: string, input: StartRoundInput): P
     preparedStems: countReadyStems(session),
     voiceTracks: session.voiceTracks.length,
     voiceCloned: Boolean(session.voiceClone),
+    studioTracksReady: session.studioTracks.filter((t) => t.state === "ready" && t.audioUrl).length,
     audioGen: isMusicGenerationAvailable(),
     stemSeparation: Boolean(process.env.LALAL_API_KEY),
   });
@@ -838,8 +908,14 @@ export async function submitAnswer(sessionCode: string, input: SubmitAnswerInput
   if (!round || session.status !== "playing") throw new Error("round_not_active");
   if (!player) throw new Error("player_not_found");
   if (!guess) throw new Error("empty_guess");
-  if (round.answers.some((answer) => answer.playerId === player.id)) {
-    return { answer: round.answers.find((answer) => answer.playerId === player.id), session: publicState(session) };
+  // Studio Session lets one player rate MANY tracks (one vote per track); every
+  // other game is one answer per player. Dedup accordingly.
+  const isStudioVote = round.miniGame === "studio_session";
+  const sameSlot = (a: SessionAnswer) =>
+    a.playerId === player.id && (!isStudioVote || voteTrackId(a.guess) === voteTrackId(guess));
+  const existing = round.answers.find(sameSlot);
+  if (existing) {
+    return { answer: existing, session: publicState(session) };
   }
 
   const submittedAt = now();
@@ -886,29 +962,58 @@ export async function submitAnswer(sessionCode: string, input: SubmitAnswerInput
 
 const clampRating = (n: number): number => Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
 
-// Tally a Voice Clash round at reveal: the studio score is the crowd average, and
-// each voter earns "critic" points for being close to that average (keeps everyone
-// honestly engaged in judging). If a PLAYER authored the track, they earn the crowd
-// score and are excluded from rating their own. Applied once (guarded by status).
-function scoreJudgeRound(session: PartySession, round: SessionRound): void {
-  const votes = round.answers.filter((a) => a.playerId !== round.creatorPlayerId);
-  const ratings = votes.map((a) => clampRating(Number.parseFloat(a.guess)));
-  const avg = ratings.length ? ratings.reduce((s, r) => s + r, 0) / ratings.length : 0;
-  round.studioScore = Math.round(avg);
+// Studio Session votes carry the rated track: "<trackId>:<rating>". Voice Clash
+// votes are a bare "<rating>" (single track). These tolerate both.
+function voteTrackId(guess: string): number | null {
+  const i = guess.indexOf(":");
+  if (i < 0) return null;
+  const n = Number(guess.slice(0, i));
+  return Number.isInteger(n) ? n : null;
+}
+function voteRating(guess: string): number {
+  const i = guess.indexOf(":");
+  return Number.parseFloat(i >= 0 ? guess.slice(i + 1) : guess);
+}
 
+// Pay one track's voters + author from a set of ratings: studio score = crowd
+// average; each voter earns 150..500 "critic" points for landing near it; the
+// author (excluded from rating their own) banks avg*7 (up to 700).
+function tallyJudgeVotes(session: PartySession, votes: SessionAnswer[], authorId: string | undefined): number {
+  const ratings = votes.map((a) => clampRating(voteRating(a.guess)));
+  const avg = ratings.length ? ratings.reduce((s, r) => s + r, 0) / ratings.length : 0;
   for (const answer of votes) {
-    const rating = clampRating(Number.parseFloat(answer.guess));
+    const rating = clampRating(voteRating(answer.guess));
     const closeness = Math.max(0, 1 - Math.abs(rating - avg) / 100); // 0..1
     const pts = 150 + Math.round(closeness * 350); // 150..500
     answer.points = pts;
     const player = session.players.find((p) => p.id === answer.playerId);
     if (player) player.score += pts;
   }
-
-  if (round.creatorPlayerId) {
-    const author = session.players.find((p) => p.id === round.creatorPlayerId);
-    if (author) author.score += Math.round(avg * 7); // up to 700 for a 100 crowd score
+  if (authorId) {
+    const author = session.players.find((p) => p.id === authorId);
+    if (author) author.score += Math.round(avg * 7);
   }
+  return Math.round(avg);
+}
+
+// Tally a judge round at reveal. Voice Clash = one track (round.creatorPlayerId).
+// Studio Session = a carousel: group votes by trackId and score each track
+// independently, filling per-track studioScore. Applied once (guarded by status).
+function scoreJudgeRound(session: PartySession, round: SessionRound): void {
+  const refs = round.studioTracksRef;
+  if (refs && refs.length) {
+    for (const ref of refs) {
+      const votes = round.answers.filter(
+        (a) => a.playerId !== ref.playerId && voteTrackId(a.guess) === ref.id,
+      );
+      ref.studioScore = tallyJudgeVotes(session, votes, ref.playerId);
+    }
+    // Headline score for the TV = the night's best track.
+    round.studioScore = refs.reduce((max, r) => Math.max(max, r.studioScore ?? 0), 0);
+    return;
+  }
+  const votes = round.answers.filter((a) => a.playerId !== round.creatorPlayerId);
+  round.studioScore = tallyJudgeVotes(session, votes, round.creatorPlayerId);
 }
 
 export function revealRound(sessionCode: string): PublicSessionState {
