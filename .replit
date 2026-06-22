@@ -2,7 +2,7 @@
 # Having this file makes Replit treat the repo as an already-configured Node app,
 # so it does NOT try to migrate it to Vite/Express. Deploy as a Reserved VM.
 
-modules = ["nodejs-20"]
+modules = ["nodejs-22"]
 run = "next dev -H 0.0.0.0"
 
 [nix]

@@ -1,8 +1,8 @@
 # API Integration Guide
 
-> **Status — this is the TARGET architecture, partially shipped.** Several pieces below are still **Planned, not shipped**: Claude **round generation** and **mood/theme** (P1–P4), Supabase Postgres/RLS/leaderboards, and the share-slug challenge flow. The routes `/api/round/generate`, `/api/host/banter`, `/api/mood`, `/api/challenge`, `/api/stems`, `/api/mxm/lyrics`, `/api/mxm/subtitle`, and `/api/mxm/match` **do not exist**. What is live today: Musixmatch proxies (now including `GET /api/mxm/genres` and `GET /api/mxm/tracks`), ElevenLabs TTS, LALAL.AI proxies, an in-memory (no-DB) session store, and **one Claude integration that did ship**: `lib/server/anthropic.ts` localizes the host banter pack into non-English/Italian narrator languages (see [§3](#3-anthropic-claude-banter-localization-shipped-rest-planned)). Host banter itself is still **localized templates voiced by ElevenLabs** — Claude only translates those templates, it does not write banter live per event. For exactly what is wired up right now, see [`../README.md`](../README.md) → "Status & known limitations".
+> **Status — this is the TARGET architecture, partially shipped.** Several pieces below are still **Planned, not shipped**: Claude **round generation** and **mood/theme** (P1–P4), Supabase Postgres/RLS/leaderboards, and the share-slug challenge flow. The routes `/api/round/generate`, `/api/host/banter`, `/api/mood`, `/api/challenge`, `/api/stems`, `/api/mxm/lyrics`, `/api/mxm/subtitle`, and `/api/mxm/match` **do not exist**. What is live today: Musixmatch proxies (now including `GET /api/mxm/genres` and `GET /api/mxm/tracks`), ElevenLabs TTS, LALAL.AI proxies, an in-memory (no-DB) session store, and **three Claude integrations that did ship** (`lib/server/anthropic.ts`): lyric-game distractors (sent the real lyric line + answer), Voice Clash bars (sent theme + player names), and host-banter localization into non-English/Italian narrator languages (see [§3](#3-anthropic-claude-3-uses-shipped-broader-generation-planned)). Host banter itself is still **localized templates voiced by ElevenLabs** — Claude only translates those templates, it does not write banter live per event. For exactly what is wired up right now, see [`../README.md`](../README.md) → "Status & known limitations".
 
-How Soundclash talks to its four external providers — **Musixmatch** (lyrics, live), **ElevenLabs** (AI host TTS, live), **Anthropic Claude** (banter localization, **live**; round generation + mood analysis, **Planned**), and **LALAL.AI** (optional karaoke stem separation, live).
+How Soundclash talks to its four external providers — **Musixmatch** (lyrics, live), **ElevenLabs** (AI host TTS, live), **Anthropic Claude** (lyric distractors + Voice Clash bars + banter localization, **live**; full round generation + mood analysis, **Planned**), and **LALAL.AI** (optional karaoke stem separation, live).
 
 Sibling docs: [`README.md`](../README.md) (stack, setup, key-safety), [`BUILD_PLAN.md`](./BUILD_PLAN.md) (5-day sequencing), [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md) (full product/data model), [`PROMPTS.md`](./PROMPTS.md) (the six Claude prompts P1–P6, all strict JSON).
 
@@ -16,12 +16,12 @@ Sibling docs: [`README.md`](../README.md) (stack, setup, key-safety), [`BUILD_PL
 |---|---|---|
 | `MXM_KEY` | Musixmatch | `apikey` query param |
 | `ELEVENLABS_API_KEY` | ElevenLabs | `xi-api-key` header |
-| `ANTHROPIC_API_KEY` (banter localization — live; needed only for non-en/it) | Anthropic Claude | `x-api-key` header (raw `fetch`, no SDK) |
+| `ANTHROPIC_API_KEY` (lyric distractors + Voice Clash bars + non-en/it banter — live) | Anthropic Claude | `x-api-key` header (raw `fetch`, no SDK) |
 | `ANTHROPIC_BANTER_MODEL` (optional) | Anthropic Claude | model-id override (default `claude-opus-4-8`) |
 | `LALAL_API_KEY` | LALAL.AI API v1 | `X-License-Key` header |
 | `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_REF` (⏳ Planned) | Supabase | migrations / direct Postgres only |
 
-> **Note:** `ANTHROPIC_API_KEY` is read (trimmed) by `lib/server/anthropic.ts` for banter localization only, via raw `fetch` to the Messages API — `@anthropic-ai/sdk` is **not** a dependency. The key is needed only to localize the **non-en/it** narrator languages; en/it use built-in static packs and never call Claude, and any other language falls back to the English pack when the key is absent. Claude round generation and mood/theme (P1–P4) and Supabase remain **Planned** — `@supabase/*` is not a dependency and there is no `supabase/` directory or DB today.
+> **Note:** `ANTHROPIC_API_KEY` is read (trimmed) by `lib/server/anthropic.ts` for three live uses — lyric-game distractors, Voice Clash bars, and banter localization — via raw `fetch` to the Messages API; `@anthropic-ai/sdk` is **not** a dependency. With the key absent, distractors fall back to local heuristics, Voice Clash bars use a template, and non-en/it banter falls back to the English pack (en/it use built-in static packs and never call Claude). Full Claude round generation and mood/theme (P1/P3/P4) and Supabase remain **Planned** — `@supabase/*` is not a dependency and there is no `supabase/` directory or DB today.
 
 Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` would be exposed to the browser (protected by RLS) **once Supabase is added — Planned**. Secrets live only in `.env.local` (gitignored); on Replit they go in Secrets. **Rotate the ElevenLabs key (and the Supabase DB password if/when Supabase is provisioned) before submission** — the ElevenLabs key was pasted in chat at some point.
 
@@ -87,7 +87,7 @@ The `<LiveLyric>` component (see [`BUILD_PLAN.md`](./BUILD_PLAN.md) Day 1) highl
 | **Stem Guess Lab** | LALAL.AI upload/split + optional Musixmatch metadata | Split a local clip and guess extracted stem vs backing. |
 | **Karaoke (stretch)** | `track.richsync.get` + `track.subtitle.get` | Word/timing accuracy from richsync token offsets; line-level fallback from subtitle. |
 
-> **Mood/theme is NOT a Musixmatch call.** `track.lyrics.mood.get` is 403 on the key — the mood/theme intended to flavor host banter and round selection would come from Claude (P4, ⏳ Planned) reading the full lyrics. See [§3](#3-anthropic-claude-banter-localization-shipped-rest-planned). (Today there is no mood/theme analysis at runtime; host banter is template-driven — Claude only localizes those templates per language, see [§3.1](#31-banter-localization-live).)
+> **Mood/theme is NOT a Musixmatch call.** `track.lyrics.mood.get` is 403 on the key — the mood/theme intended to flavor host banter and round selection would come from Claude (P4, ⏳ Planned) reading the full lyrics. See [§3](#3-anthropic-claude-3-uses-shipped-broader-generation-planned). (Today there is no mood/theme analysis at runtime; host banter is template-driven — Claude only localizes those templates per language, see [§3.1](#31-banter-localization-live).)
 
 ### 1.4 Mandatory copyright + tracking display rule
 
@@ -148,7 +148,7 @@ Sibling proxy routes follow the same pattern. **Live today:** `GET /api/mxm/sear
 
 ## 2. ElevenLabs (AI host TTS + soundtrack)
 
-The AI host (BEATBOT) speaks at: round intro, correct answer, wrong answer, score reveal, game outro. **Today the lines are `{placeholder}` string templates** (see `lib/game/host-banter.ts`) voiced by ElevenLabs. The host picks one of **29 narrator languages** at session creation (`lib/game/languages.ts`, the `eleven_multilingual_v2` set); that code is stored on the session as `narratorLang`, used to select/localize the banter pack (en/it static; others translated once by Claude — see [§3](#3-anthropic-claude-banter-localization-shipped-rest-planned)), and sent to ElevenLabs as `language_code` on every TTS call. Runtime values (player names, guesses, scores) are interpolated into the templates **in code**, not by Claude.
+The AI host (BEATBOT) speaks at: round intro, correct answer, wrong answer, score reveal, game outro. **Today the lines are `{placeholder}` string templates** (see `lib/game/host-banter.ts`) voiced by ElevenLabs. The host picks one of **29 narrator languages** at session creation (`lib/game/languages.ts`, the `eleven_multilingual_v2` set); that code is stored on the session as `narratorLang`, used to select/localize the banter pack (en/it static; others translated once by Claude — see [§3](#3-anthropic-claude-3-uses-shipped-broader-generation-planned)), and sent to ElevenLabs as `language_code` on every TTS call. Runtime values (player names, guesses, scores) are interpolated into the templates **in code**, not by Claude.
 
 - **Auth:** `xi-api-key` **header**, reads `ELEVENLABS_API_KEY`.
 - **Tier (verified):** creator, **~131k credits**. Lines are short (1–2 sentences) to stay well within budget.
@@ -245,11 +245,11 @@ to the audio-state/analyser events and controls the same player.
 
 ---
 
-## 3. Anthropic Claude (banter localization shipped; rest Planned)
+## 3. Anthropic Claude (3 uses shipped; broader generation Planned)
 
-> **One Claude integration shipped; the rest is still the target design.** What's **live today** is `lib/server/anthropic.ts`: it localizes the host banter pack into narrator languages other than English/Italian (see [§3.1](#31-banter-localization-live)). What's **⏳ Planned** (no SDK, no routes): round generation (P1–P3), per-event host banter (P5/P6), and mood/theme (P4) — see [§3.2](#32-planned--round-generation-host-banter-mood). There is **no** `@anthropic-ai/sdk` dependency; the live path uses raw `fetch`. Rounds today are built/validated server-side by the live `/api/rounds/*` routes with no LLM; the banter text itself is still templates (Claude only translates the templates per language, it does not write banter live per event).
+> **Three Claude integrations shipped; broader generation is still the target design.** Live today in `lib/server/anthropic.ts` (all raw `fetch`, **no** `@anthropic-ai/sdk`, `cache: "no-store"`, never logged/persisted): (1) **lyric-game distractors** — `generateLyricChoices` is sent the real lyric line + answer for Finish the Line / Next Line / Misheard and returns tempting wrong options (in-memory cache, falls back to local heuristics; model `claude-sonnet-4-6` / `ANTHROPIC_CHOICES_MODEL`); (2) **Voice Clash bars** — `writeBars` is sent the theme + player names and returns short rap bars; (3) **banter localization** — `resolveBanterPack` translates the host banter pack into non-en/it narrator languages, seeing only `{placeholder}` templates (see [§3.1](#31-banter-localization-live)). What's **⏳ Planned** (no routes): full round generation (P1), name-that-song decoys (P3), per-event host banter (P5/P6), and mood/theme (P4) — see [§3.2](#32-planned--round-generation-host-banter-mood). Rounds today are built/validated server-side by the live `/api/rounds/*` routes; the banter text itself is still templates (Claude translates them per language, it does not write banter live per event).
 
-- **Model:** default `claude-opus-4-8` (constant `DEFAULT_MODEL`); override per deployment with `ANTHROPIC_BANTER_MODEL` (e.g. a faster/cheaper model when room-creation latency matters).
+- **Model:** banter + bars default to `claude-opus-4-8` (`DEFAULT_MODEL`, override `ANTHROPIC_BANTER_MODEL`); lyric distractors default to `claude-sonnet-4-6` (override `ANTHROPIC_CHOICES_MODEL`) since they run per-round on the critical path.
 - **Transport:** raw `fetch` to `POST https://api.anthropic.com/v1/messages` with headers `x-api-key`, `anthropic-version: 2023-06-01`, `Content-Type: application/json`. Reads `ANTHROPIC_API_KEY` (trimmed) from the environment — never hardcode the key. **No SDK.**
 - **Output:** structured outputs via `output_config: { format: { type: "json_schema", schema } }` so the response is guaranteed parseable. No `thinking` config is sent.
 
@@ -294,7 +294,7 @@ const pack = toBanterPack(JSON.parse(text)); // coerced field-by-field to EN def
 
 > **Not built yet.** The routes in this subsection do not exist; round generation, per-event host banter, and mood/theme are template- or server-regeneration-driven today. This is the target design.
 
-- **Used for:** round generation (P1–P3), host banter (P5/P6), and **mood/theme analysis (P4)** — the replacement for the 403 `track.lyrics.mood.get` endpoint.
+- **Used for:** full round generation (P1), name-that-song decoys (P3), host banter (P5/P6), and **mood/theme analysis (P4)** — the replacement for the 403 `track.lyrics.mood.get` endpoint. *(P2-style misheard/finish-line/next-line decoys already shipped as `generateLyricChoices` — see [§3](#3-anthropic-claude-3-uses-shipped-broader-generation-planned).)*
 - **Output:** all six prompts return **strict JSON** via the same `output_config.format` / `json_schema` structured-output shape used live in §3.1. Default to adaptive thinking for the generation prompts.
 
 > The six prompts (P1 round generator, P2 misheard decoys, P3 name-that-song decoys, P4 mood+theme, P5 host system prompt per persona, P6 host banter per event) are fully written in [`PROMPTS.md`](./PROMPTS.md). This subsection covers only the transport.

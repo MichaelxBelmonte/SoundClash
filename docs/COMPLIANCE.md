@@ -1,6 +1,6 @@
 # Compliance & Security
 
-> **Status:** This document describes the **target architecture**, not the current build. The in-memory lyric-handling posture (references only, no lyric-text persistence, server-side keys) is **live today**. Supabase Postgres/RLS and Anthropic Claude for round/decoy/mood generation are **PLANNED, not yet built** — there is no `@supabase` or `@anthropic-ai` dependency, and routes such as `/api/round/generate`, `/api/mood`, and `/api/challenge` do not exist. **Claude is now live for one narrow use only**: localizing the BEATBOT host banter pack into non-English/Italian narrator languages (`lib/server/anthropic.ts`), called via raw `fetch` (no SDK). It receives only an English template pack plus a language name — **never any session, player, or lyric data** (see [§5](#5-claude--llm-lyric-handling--planned)). For exactly what is live today, see [`../README.md`](../README.md) → "Status & known limitations".
+> **Status:** This document covers how Soundclash handles licensed content **today**, plus the **planned** persistence layer. The lyric-handling posture (references only, **no lyric-text persistence**, server-side keys) is live today. Supabase Postgres/RLS is **PLANNED, not yet built** — there is no `@supabase` dependency, and routes such as `/api/round/generate`, `/api/mood`, and `/api/challenge` do not exist. **Claude is live for three narrow uses** (`lib/server/anthropic.ts`, raw `fetch`, no SDK, `cache: "no-store"`, never logged or persisted): (1) **lyric-game distractors** — receives the real lyric line + answer and returns wrong options (transient, in-memory cache only); (2) **Voice Clash bars** — receives the round theme + player names; (3) **host-banter localization** — receives only `{placeholder}` template strings (no lyrics/session data). So Claude **does** process lyric lines and player names in real time as a sub-processor, but **never stores or redistributes** them (see [§5](#5-claude--llm-handling)). The broader Claude round/mood generation (P-series) remains PLANNED. For exactly what is live today, see [`../README.md`](../README.md) → "Status & known limitations".
 
 This document is the single source of truth for how **Soundclash** handles licensed lyric content, provider secrets, and contest content-usage rules. It is written to be **judge-verifiable**: every claim below can be checked against the public repo, the running demo, or a network trace.
 
@@ -26,7 +26,7 @@ A judge can verify each item independently. Verification hints are in the right 
 | 8 | **`.env.local` is gitignored and absent from the public repo** (and its full history). | ✅ | `git -C . log --all --name-only \| grep .env.local` returns nothing; only `.env.example` is tracked. |
 | 9 | **Supabase RLS enabled on every table.** | ⏳ Planned | No Supabase tables exist yet (sessions are in-memory). See target policies in [`DATA_MODEL.md`](./DATA_MODEL.md). |
 | 10 | **Non-commercial demo use only.** | ✅ | Stated in [`README.md`](../README.md) and below. |
-| 11 | **Keys pasted in chat are flagged for rotation** (ElevenLabs key, Supabase DB password). | ⚠️ Action required | See [§6 Key Rotation](#6-key-rotation-required). |
+| 11 | **Keys pasted in chat have been rotated** (ElevenLabs key, Supabase DB password). | ✅ Done (2026-06-22) | See [§6 Key Rotation](#6-key-rotation-done). |
 
 Legend: ✅ implemented/verified · ⏳ Planned (target architecture, not yet built) · ⚠️ action required before/at submission.
 
@@ -67,7 +67,7 @@ This is the core of our compliance posture: **we store what to regenerate, not t
    regenerated, never    │  Musixmatch fetch (search/track/richsync)     │
    stored                │            +                                  │
                          │  server-side regeneration (answer/decoys)     │
-                         │  Claude (prompt/options/mood) — ⏳ PLANNED     │
+                         │  Claude distractors (LIVE) · mood ⏳ PLANNED  │
                          └───────────────────────┬─────────────────────┘
                                                  │  shown transiently
                                                  ▼
@@ -85,7 +85,7 @@ This is the core of our compliance posture: **we store what to regenerate, not t
 | `line_index` | ✅ reference | index into the live-fetched lyric body |
 | `round_type` / `seed` | ✅ reference | seed makes regeneration deterministic |
 | `prompt` (e.g. line with blanked word) | ❌ never | regenerated live from the Musixmatch lyric body (Claude prompt P1 ⏳ planned) |
-| `options[]` (decoys) | ❌ never | regenerated live server-side (Claude prompts P2/P3 ⏳ planned) |
+| `options[]` (decoys) | ❌ never | regenerated live server-side; tempting distractors written **live by Claude** (`generateLyricChoices`) when `ANTHROPIC_API_KEY` is set, else local heuristics — never persisted |
 | `answer` (correct word/line/song) | ❌ never | regenerated live from the lyric body (`/api/rounds/check`, `/api/rounds/finish-line`) |
 | `copyright` string | ❌ never | comes back live from Musixmatch on each fetch |
 
@@ -136,7 +136,7 @@ A persisted round = `track_id + line_index + round_type + seed`. At play time we
 
 - A challenge replays the **same rounds** for every friend (same blanks, same decoy ordering) without storing any lyric text.
 - Two players hitting the same `share_slug` get identical prompts because the seed drives decoy selection and word-blanking deterministically. _(Persisted rounds + share-slug replay are ⏳ planned; today rounds live in the in-memory session store.)_
-- Decoys (misheard / name-that-song / next-line distractors) are regenerated live and held in memory only for the round's lifetime. _Claude-generated decoys (prompts **P2/P3** in [`PROMPTS.md`](./PROMPTS.md)) are ⏳ planned._
+- Decoys (misheard / next-line / finish-line distractors) are regenerated live and held in memory only for the round's lifetime. **Claude-generated decoys are live today** (`generateLyricChoices`, `lib/server/anthropic.ts`): the real lyric line + answer are sent to Claude, which returns tempting wrong options; the result is cached **in memory** per line and falls back to local heuristics on any failure. Nothing is persisted. _(Name-that-song decoys and the broader P-series prompts in [`PROMPTS.md`](./PROMPTS.md) remain ⏳ planned.)_
 
 ### 2.4 Mandatory attribution + tracking on every render
 
@@ -185,7 +185,7 @@ This richsync body is fetched live, used for the karaoke stretch mode, and never
 
 ### 3.1 Server-side proxy — the browser never sees a secret
 
-All provider calls happen **only** inside Next.js server route handlers / server actions acting as a proxy. The browser talks to our own API routes; our server talks to the providers with secret keys. Live today: Musixmatch (`lib/server/musixmatch.ts`), ElevenLabs TTS (`lib/server/elevenlabs.ts`), LALAL.AI stems (`lib/server/lalal.ts`), and Anthropic Claude for host-banter localization only (`lib/server/anthropic.ts`, server-only, raw `fetch` — no SDK dependency). Planned: Supabase service operations and the broader Claude round/decoy/mood generation (no `@supabase` dependency is installed yet).
+All provider calls happen **only** inside Next.js server route handlers / server actions acting as a proxy. The browser talks to our own API routes; our server talks to the providers with secret keys. Live today: Musixmatch (`lib/server/musixmatch.ts`), ElevenLabs TTS (`lib/server/elevenlabs.ts`), LALAL.AI stems (`lib/server/lalal.ts`), and Anthropic Claude for three uses — lyric-game distractors, Voice Clash bars, and host-banter localization (`lib/server/anthropic.ts`, server-only, raw `fetch` — no SDK dependency). Planned: Supabase service operations and the broader Claude round/mood generation (no `@supabase` dependency is installed yet).
 
 ```
 Browser ──> /api/* (Next.js server route / action) ──> Musixmatch / ElevenLabs / Anthropic
@@ -288,48 +288,61 @@ Lyric prompts, options, answers, and `lyrics_copyright` strings exist **only in 
 
 ## 5. Claude / LLM Handling
 
-### 5.1 Live today: host-banter localization (no lyric or session data)
+Claude is live for **three** server-side uses. Two of them (lyric distractors, Voice Clash bars) process licensed lyric lines or player names in real time; all three are transient — `cache: "no-store"`, never logged, never written to disk or DB. Transport is a server-only raw `fetch` to `POST https://api.anthropic.com/v1/messages` (no `@anthropic-ai/sdk` dependency), with structured JSON output where applicable. Anthropic acts as a **real-time sub-processor**: it sees content to generate the round, and stores/redistributes nothing.
 
-One Claude call is live, and it touches **no licensed content and no user/session data**. When a host picks a narrator language other than English or Italian, `resolveBanterPack` (`lib/server/anthropic.ts`) localizes the BEATBOT host "banter pack" into that language. English and Italian use built-in static packs (`lib/game/host-banter.ts`) and never call Claude.
+### 5.1 Lyric-game distractors (LIVE — processes lyric text, never stores it)
 
-- **What is sent to Anthropic:** only the English template pack (`{placeholder}`-token strings like "round {index}" and the room-code/leader templates) plus the target language name. **No lyric text, no player names, no guesses, no track IDs, and no session data are ever sent** — runtime values are interpolated into the returned template strings in our own code, after the call.
-- **Transport:** server-only module, raw `fetch` to `POST https://api.anthropic.com/v1/messages` (no `@anthropic-ai/sdk` dependency); `cache: "no-store"`; structured JSON output via `output_config.format` (`json_schema`).
-- **Caching:** a generated pack is cached **module-global, keyed by language code** for the life of the warm server process; it holds only language templates, never session content. There is no disk/DB persistence of Claude output.
-- **Fallback:** if `ANTHROPIC_API_KEY` is absent or Claude is unavailable (non-200, refusal, unparseable, or any error), the code falls back to the English pack so the show always has lines — i.e. those languages silently narrate in English text, never an empty/broken render.
+`generateLyricChoices` (`lib/server/anthropic.ts`) writes tempting wrong options for the lyrics games (Finish the Line, Next Line, Misheard).
+
+- **What is sent:** the **real lyric line** and the **correct answer** for that round, plus the game type and option count. This is licensed Musixmatch content, sent **transiently** only to generate distractors.
+- **What comes back:** only the wrong options (the answer is excluded), parsed from strict JSON (`json_schema`).
+- **Caching:** results are cached **in memory** (module-global `Map`) keyed by `(game, line, answer)` for the warm process only — never on disk or in a DB. This is real-time generation, not lyric storage.
+- **Fallback:** if `ANTHROPIC_API_KEY` is absent, or on any non-200 / refusal / timeout (4.5s `AbortController`), the code falls back to local heuristic decoys — the round always runs.
+- **Model:** `claude-sonnet-4-6` by default (override via `ANTHROPIC_CHOICES_MODEL`).
+
+### 5.2 Voice Clash bars (LIVE — processes player names)
+
+`writeBars` (`lib/server/anthropic.ts`) writes short rap bars for the Voice Clash mini-game, read aloud by the host's cloned voice.
+
+- **What is sent:** the round **theme** and **vibe** plus the **player names** (max 6) — no lyric text and no Musixmatch content. Length-capped, transient.
+- **What comes back:** plain-text bars (≤380 chars), never stored.
+- **Fallback:** a templated line when Claude is unavailable.
 - **Model:** `claude-opus-4-8` by default (override via `ANTHROPIC_BANTER_MODEL`).
 
-> Operational note: error logging in `anthropic.ts` records only the HTTP status / error message — never the prompt or response body.
+### 5.3 Host-banter localization (LIVE — no lyric or session data)
 
-### 5.2 Planned: Claude lyric handling (⏳ not built)
+When a host picks a narrator language other than English/Italian, `resolveBanterPack` localizes the BEATBOT banter pack into that language. English and Italian use built-in static packs (`lib/game/host-banter.ts`) and never call Claude.
 
-> **Planned, not built.** No LLM call touches lyric text today; the round/decoy/mood prompts below do not exist yet. The policy applies once they are wired in.
+- **What is sent:** only the English template pack (`{placeholder}`-token strings like "round {index}" and the room-code/leader templates) plus the target language name. **No lyric text, no player names, no guesses, no track IDs, no session data** — runtime values are interpolated into the returned template strings in our own code, after the call.
+- **Caching:** the generated pack is cached **module-global, keyed by language code** for the warm process; it holds only language templates, never session content.
+- **Fallback:** the English pack if no key / on any error, so the show always has lines.
+- **Model:** `claude-opus-4-8` by default (override via `ANTHROPIC_BANTER_MODEL`).
 
-In the target design, lyric usage inside LLM calls is **transient**:
+> **Operational notes:** error logging in `anthropic.ts` records only the HTTP status / error message — never the prompt or response body. No request/response logging captures lyric text, and nothing Claude sees or returns is persisted to disk or DB.
 
-- Prompts that include lyric text (P1 round generator, P2 misheard decoys, P3 name-that-song decoys, P4 mood/theme) are sent live and **never logged or stored**.
-- All prompts return **strict JSON** so output can be parsed and shown without persisting raw lyric strings.
-- Model: `claude-opus-4-8`. Full prompt definitions: [`PROMPTS.md`](./PROMPTS.md).
+### 5.4 Planned: broader Claude generation (⏳ not built)
 
-> Operational note: do not enable request/response logging that would capture lyric text, and scrub lyric content from any error reporting.
+The P-series prompts in [`PROMPTS.md`](./PROMPTS.md) — full round generation (P1), name-that-song decoys (P3), and mood/theme (P4) — are **not wired yet**. When added, they must follow the same transient / no-store / no-log posture as §5.1–5.3.
 
 ---
 
-## 6. Key Rotation (Required)
+## 6. Key Rotation (Done)
 
-Some keys were **pasted into chat** during development and must be treated as compromised. Rotate before submission/public demo.
+Some keys were **pasted into chat** during development and were treated as compromised. They have been **rotated (2026-06-22)**: a new `ELEVENLABS_API_KEY` and a reset `SUPABASE_DB_PASSWORD` are in the deployment secrets / `.env.local`, and the old values are revoked.
 
-| Key | Risk | Action |
+| Key | Risk | Status |
 |-----|------|--------|
-| **`ELEVENLABS_API_KEY`** | Exposed in chat. Tier: creator, ~131k credits — abuse would drain credits. | **Rotate now.** Generate a new key in the ElevenLabs dashboard, revoke the old one, update `.env.local`. |
-| **`SUPABASE_DB_PASSWORD`** | Exposed in chat. Grants full DB access. | **Rotate now.** Reset the database password in Supabase project settings, update `.env.local`. |
+| **`ELEVENLABS_API_KEY`** | Was exposed in chat. Tier: creator, ~131k credits — abuse would drain credits. | ✅ **Rotated** — new key issued, old key revoked. |
+| **`SUPABASE_DB_PASSWORD`** | Was exposed in chat. Grants full DB access. | ✅ **Rotated** — database password reset. |
+
+No real secret ever entered git (verified — only `.env.example` is tracked, and `.env.local` is absent from the full history):
 
 ```bash
-# After rotating, confirm no real secret leaked into git (should print nothing):
-git -C . log --all --name-only | grep -i '.env.local'
-git -C . ls-files | grep -E '\.env' # should show only: .env.example
+git -C . log --all --name-only | grep -i '.env.local'   # prints nothing
+git -C . ls-files | grep -E '\.env'                       # only: .env.example
 ```
 
-> Also recommended (lower urgency): if `MXM_KEY` or `ANTHROPIC_API_KEY` were ever pasted anywhere outside `.env.local`, rotate those too.
+> If `MXM_KEY` or `ANTHROPIC_API_KEY` were ever pasted anywhere outside `.env.local`, rotate those too.
 
 ---
 
@@ -346,4 +359,4 @@ For the Musixmatch Musicathon 2026 submission, Soundclash operates strictly with
 
 ---
 
-_Last reviewed: 2026-06-20. Maintainer: solo developer. See [`README.md`](../README.md) for project overview and demo URL._
+_Last reviewed: 2026-06-22. Maintainer: solo developer. Live demo: https://soundclash-production-9c06.up.railway.app/ · 90s walkthrough: https://www.youtube.com/watch?v=i-jfkAoH054. See [`README.md`](../README.md) for project overview._

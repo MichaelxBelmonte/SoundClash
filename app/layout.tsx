@@ -37,7 +37,7 @@ const description =
   "The music party game where friends clash on the same track. Powered by live Musixmatch lyrics.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://soundclash.app"),
+  metadataBase: new URL("https://soundclash-production-9c06.up.railway.app"),
   title: "Soundclash",
   description,
   applicationName: "Soundclash",
