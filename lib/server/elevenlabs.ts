@@ -157,7 +157,10 @@ export async function composeMusic(input: MusicInput): Promise<Response> {
     body: JSON.stringify({
       prompt,
       music_length_ms: input.musicLengthMs ?? 45000,
-      model_id: input.modelId ?? process.env.ELEVENLABS_MUSIC_MODEL ?? "music_v2",
+      // Use || (not ??) so an EMPTY-STRING env var (e.g. ELEVENLABS_MUSIC_MODEL=""
+      // set blank on Railway) still falls back to the default — ?? would forward the
+      // empty string as model_id and the Music API rejects it with HTTP 422.
+      model_id: input.modelId?.trim() || process.env.ELEVENLABS_MUSIC_MODEL?.trim() || "music_v2",
       force_instrumental: input.forceInstrumental ?? true,
     }),
     cache: "no-store",
