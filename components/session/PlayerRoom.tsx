@@ -76,6 +76,21 @@ export default function PlayerRoom({ code }: { code: string }) {
     () => session?.studioTracks?.find((t) => t.playerId === playerId) ?? null,
     [playerId, session?.studioTracks],
   );
+  // Studio Session: which tracks this player has already rated (trackId → rating),
+  // parsed from their "<trackId>:<rating>" answers.
+  const myStudioVotes = useMemo(() => {
+    const map: Record<number, number> = {};
+    const round = session?.currentRound;
+    if (round?.miniGame !== "studio_session") return map;
+    for (const a of round.answers) {
+      if (a.playerId !== playerId) continue;
+      const i = a.guess.indexOf(":");
+      if (i < 0) continue;
+      const tid = Number(a.guess.slice(0, i));
+      if (Number.isInteger(tid)) map[tid] = Number(a.guess.slice(i + 1));
+    }
+    return map;
+  }, [playerId, session?.currentRound]);
 
   // Live placement from the pre-sorted players list (no extra work server-side).
   const myRank = useMemo(() => {
@@ -97,7 +112,10 @@ export default function PlayerRoom({ code }: { code: string }) {
 
   async function submitGuess(value: string) {
     const cleanGuess = value.trim();
-    if (!playerId || !cleanGuess || submitting || answer) return;
+    // Studio Session lets a player rate many tracks, so don't block on a prior
+    // answer; the server dedups per (player, track).
+    const isStudio = session?.currentRound?.miniGame === "studio_session";
+    if (!playerId || !cleanGuess || submitting || (answer && !isStudio)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -241,7 +259,15 @@ export default function PlayerRoom({ code }: { code: string }) {
               Watch the main screen. Lock once before the host reveals.
             </p>
 
-            {answer ? (
+            {session.currentRound.miniGame === "studio_session" ? (
+              <StudioRatePad
+                round={session.currentRound}
+                playerId={playerId}
+                submitting={submitting}
+                myVotes={myStudioVotes}
+                onRate={(trackId, score) => void submitGuess(`${trackId}:${score}`)}
+              />
+            ) : answer ? (
               <AnswerFeedback
                 key={`${session.currentRound.index}-${session.currentRound.status}`}
                 round={session.currentRound}
@@ -385,6 +411,90 @@ function JudgePad({
       <Button type="button" variant="magenta" full disabled={submitting} onClick={() => onRate(value)}>
         {submitting ? "Locking…" : "Lock my rating"}
       </Button>
+    </div>
+  );
+}
+
+// Studio Session: rate every track (except your own) on the phone while the TV
+// plays them. Each track is a separate "<trackId>:<rating>" vote; locked tracks
+// show their value. At reveal, shows each track's crowd score.
+function StudioRatePad({
+  round,
+  playerId,
+  submitting,
+  myVotes,
+  onRate,
+}: {
+  round: NonNullable<PublicSessionState["currentRound"]>;
+  playerId: string;
+  submitting: boolean;
+  myVotes: Record<number, number>;
+  onRate: (trackId: number, score: number) => void;
+}) {
+  const tracks = (round.studioTracksRef ?? []).filter((t) => t.playerId !== playerId);
+  const revealed = round.status === "revealed";
+  const [draft, setDraft] = useState<Record<number, number>>({});
+
+  if (!tracks.length) {
+    return (
+      <div className="mt-6 rounded-xl border-2 border-black/15 bg-white p-5 text-center">
+        <p className="font-condensed text-2xl uppercase tracking-tight text-[#15120E]">Your track is on 🎤</p>
+        <p className="mt-2 text-sm text-black/55">Watch the big screen — the crowd is rating it.</p>
+      </div>
+    );
+  }
+
+  if (revealed) {
+    return (
+      <div className="mt-6 grid gap-2">
+        {tracks.map((t) => (
+          <div
+            key={t.id}
+            className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-black/10 bg-white/60 px-3 py-2"
+          >
+            <span className="truncate text-black/70">{t.playerName}</span>
+            <span className="font-mono tabular-nums text-[#15120E]">{t.studioScore ?? 0}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 space-y-3">
+      <p className="text-sm text-black/55">Rate each track as it plays on the big screen.</p>
+      {tracks.map((t) => {
+        const locked = t.id in myVotes;
+        const value = locked ? myVotes[t.id] : draft[t.id] ?? 50;
+        return (
+          <div
+            key={t.id}
+            className={["rounded-xl border-2 p-4", locked ? "border-[#0a7d55]/40 bg-[#0a7d55]/5" : "border-black/15 bg-white"].join(" ")}
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-condensed text-base uppercase tracking-[0.03em] text-[#15120E]">{t.playerName}</span>
+              <span className="font-condensed text-2xl tabular-nums text-[#15120E]">{value}</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={value}
+              onChange={(e) => setDraft((d) => ({ ...d, [t.id]: Number(e.target.value) }))}
+              disabled={locked || submitting}
+              className="mt-2 w-full accent-[#C2563B] disabled:opacity-60"
+              aria-label={`Rate ${t.playerName}'s track`}
+            />
+            {locked ? (
+              <p className="mt-1 text-center font-mono text-[0.6rem] uppercase tracking-[0.14em] text-[#0a7d55]">locked ✓</p>
+            ) : (
+              <Button type="button" variant="magenta" full disabled={submitting} onClick={() => onRate(t.id, value)}>
+                Lock rating
+              </Button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -55,8 +55,9 @@ export const MINI_GAME_CATALOG: MiniGameMeta[] = [
   { id: "voice_clash", name: "Voice Clash", blurb: "The host's cloned voice drops a track — rate it.", example: "rate the host's AI track", category: "trivia", image: "/games/artist_pick.png" },
   // Studio Session (needs ELEVENLABS_API_KEY; each player records a line in the
   // lobby Studio booth → STT → the AI sings it over a beat → the crowd rates every
-  // track). No image yet → falls back to the built-in SVG line-art.
-  { id: "studio_session", name: "Studio Session", blurb: "Record a line — the AI sings it, the crowd rates it.", example: "tap mic ~10s → hear your AI track", category: "trivia" },
+  // track). Reuses the unused name_song.png (stacked audio waveforms — fits the
+  // record/voice theme).
+  { id: "studio_session", name: "Studio Session", blurb: "Record a line — the AI sings it, the crowd rates it.", example: "tap mic ~10s → hear your AI track", category: "trivia", image: "/games/name_song.png" },
 ];
 
 // Façade-only entries shown in the host gallery as "Coming soon". They are NOT

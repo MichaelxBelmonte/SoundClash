@@ -30,6 +30,7 @@ import {
   ALL_MINI_GAME_IDS,
   CATEGORY_META,
   COMING_SOON_GAMES,
+  contentSourceFor,
   gameBlockers,
   MINI_GAME_CATALOG,
   MINI_GAME_CATEGORIES,
@@ -68,6 +69,15 @@ const QUICK_SET: MiniGameId[] = ["finish_line", "genre_roulette", "beat_lock"];
 // these until the reveal. (stem_heist is audio-only, so its header is already
 // hidden via audioUrl; word_rush deliberately names the track in its own prompt.)
 const ANSWER_IS_SOURCE = new Set<MiniGameId>(["name_song", "song_mash", "artist_pick"]);
+
+// Games that need the host (or players) to prepare content before they can run get
+// a banner on their picker card, so it's obvious at a glance they aren't plug-and-
+// play. Keyed by content source; generated/lyrics games need no extra prep banner.
+const PREP_BANNER: Record<string, string> = {
+  "host-audio": "Needs audio upload",
+  "host-voice": "Needs your voice",
+  "player-voice": "Players record",
+};
 
 // Stand-in "track" for generated-only shows (Genre Roulette / Beat Lock make their
 // own audio, so there is no Musixmatch deck). The seed still varies per round.
@@ -689,6 +699,7 @@ export default function HostRoom({ code }: { code: string }) {
                     const tone = TONE_STYLES[meta.tone];
                     const selected = session.miniGames.includes(game.id);
                     const isLast = selected && session.miniGames.length === 1;
+                    const prepLabel = PREP_BANNER[contentSourceFor(game.id)];
                     return (
                       <button
                         key={game.id}
@@ -735,18 +746,31 @@ export default function HostRoom({ code }: { code: string }) {
                               {game.example}
                             </span>
                           </div>
-                          <span
-                            className={[
-                              "absolute left-2 top-2 rounded-full px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em]",
-                              tone.tag,
-                            ].join(" ")}
-                          >
-                            {meta.label}
-                          </span>
+                          {/* Banner for games that need setup before they can run
+                              (e.g. Stem Heist needs uploaded audio). */}
+                          {prepLabel ? (
+                            <div className="absolute inset-x-0 top-0 z-20 bg-tangerine px-1.5 py-1 text-center font-mono text-[0.5rem] font-semibold uppercase leading-none tracking-[0.08em] text-ink">
+                              {prepLabel}
+                            </div>
+                          ) : null}
+                          {/* Category tag — hidden when a prep banner owns the top
+                              strip, so the two never collide. The card's accent colour
+                              still signals the category. */}
+                          {!prepLabel ? (
+                            <span
+                              className={[
+                                "absolute left-2 top-2 rounded-full px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em]",
+                                tone.tag,
+                              ].join(" ")}
+                            >
+                              {meta.label}
+                            </span>
+                          ) : null}
                           {selected ? (
                             <span
                               className={[
-                                "absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full",
+                                "absolute right-2 grid h-5 w-5 place-items-center rounded-full",
+                                prepLabel ? "top-8" : "top-2",
                                 tone.check,
                               ].join(" ")}
                             >
@@ -1158,7 +1182,9 @@ function HostRound({
         </div>
       </div>
 
-      {active?.answerType === "judge" ? (
+      {active?.miniGame === "studio_session" ? (
+        <StudioSessionStage round={active} />
+      ) : active?.answerType === "judge" ? (
         <VoiceClashStage round={active} />
       ) : active?.audioUrl ? (
         <AudioRoundStage round={active} />
@@ -1449,6 +1475,115 @@ function VoiceClashStage({ round }: { round: NonNullable<PublicSessionState["cur
       </div>
       {round.lyric ? (
         <p className="mt-4 whitespace-pre-line text-xl leading-relaxed text-ink/90">{round.lyric}</p>
+      ) : null}
+    </div>
+  );
+}
+
+// Studio Session (judge carousel): play each player's AI-sung track in sequence
+// on the TV (one mixed mp3 apiece), show the author + lyric while the crowd rates
+// it on their phones, then reveal a per-track scoreboard + Track of the Night.
+function StudioSessionStage({ round }: { round: NonNullable<PublicSessionState["currentRound"]> }) {
+  const tracks = round.studioTracksRef ?? [];
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [idx, setIdx] = useState(0);
+  const [blocked, setBlocked] = useState(false);
+  const answering = round.status === "answering";
+  const current = tracks.length ? tracks[Math.min(idx, tracks.length - 1)] : null;
+
+  const tryPlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    void el
+      .play()
+      .then(() => setBlocked(false))
+      .catch(() => setBlocked(true));
+  }, []);
+
+  // Load + play the current track while answering; advance on end/error.
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !current) return;
+    if (el.getAttribute("data-src") !== current.audioUrl) {
+      el.src = current.audioUrl;
+      el.setAttribute("data-src", current.audioUrl);
+      el.load();
+    }
+    el.volume = 1;
+    if (answering) tryPlay();
+    else el.pause();
+    return () => el.pause();
+  }, [current?.audioUrl, answering, tryPlay]);
+
+  const advance = useCallback(() => setIdx((i) => Math.min(i + 1, tracks.length - 1)), [tracks.length]);
+
+  // Reveal: rank the tracks by crowd score and crown the night's best.
+  if (round.status === "revealed") {
+    const ranked = [...tracks].sort((a, b) => (b.studioScore ?? 0) - (a.studioScore ?? 0));
+    const winner = ranked[0];
+    return (
+      <div className="mt-8 rounded-md border border-black/10 bg-black/[0.04] p-5">
+        {winner ? (
+          <div className="flex items-baseline justify-between gap-4">
+            <div className="min-w-0">
+              <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-black/45">Track of the night</p>
+              <p className="truncate text-2xl font-bold text-ink">{winner.playerName}</p>
+            </div>
+            <p className="shrink-0 text-4xl font-bold text-brand">{winner.studioScore ?? 0}</p>
+          </div>
+        ) : null}
+        <div className="mt-4 grid gap-2">
+          {ranked.map((t) => (
+            <div key={t.id} className="grid grid-cols-[1fr_auto] gap-3 text-sm">
+              <span className="truncate text-black/70">{t.playerName} · “{t.lyric}”</span>
+              <span className="font-mono tabular-nums text-ink">{t.studioScore ?? 0}</span>
+            </div>
+          ))}
+          {ranked.length === 0 ? <p className="text-sm text-black/45">No tracks this round.</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8 rounded-md border border-black/10 bg-black/[0.04] p-5">
+      <audio ref={audioRef} preload="auto" onEnded={advance} onError={advance} />
+      <div className="flex items-center gap-4">
+        <span
+          aria-hidden
+          className={["inline-block h-6 w-6 shrink-0 rounded-full bg-brand", answering ? "animate-pulse" : ""].join(" ")}
+        />
+        <div className="min-w-0">
+          <p className="font-mono text-[0.6rem] uppercase tracking-[0.2em] text-black/45">
+            Now playing · track {Math.min(idx + 1, tracks.length)}/{tracks.length}
+          </p>
+          <p className="truncate text-lg font-semibold text-ink">
+            {current ? `${current.playerName}'s track — rate it on your phone` : "No tracks yet"}
+          </p>
+        </div>
+        {blocked && answering ? (
+          <button
+            type="button"
+            onClick={tryPlay}
+            className="ml-auto flex h-11 shrink-0 items-center gap-2 rounded-md bg-brand px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-400"
+          >
+            ▶ Tap for audio
+          </button>
+        ) : null}
+      </div>
+      {current?.lyric ? (
+        <p className="mt-4 whitespace-pre-line text-xl leading-relaxed text-ink/90">{current.lyric}</p>
+      ) : null}
+      {/* carousel position dots */}
+      {tracks.length > 1 ? (
+        <div className="mt-4 flex gap-1.5">
+          {tracks.map((t, i) => (
+            <span
+              key={t.id}
+              className={["h-1.5 flex-1 rounded-full transition-colors", i <= idx ? "bg-brand" : "bg-black/10"].join(" ")}
+            />
+          ))}
+        </div>
       ) : null}
     </div>
   );
